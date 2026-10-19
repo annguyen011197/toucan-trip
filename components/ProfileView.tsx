@@ -5,12 +5,16 @@ import { Camera, Loader2, LogOut } from "lucide-react";
 import { useApp } from "@/lib/app-state";
 import { useAuth } from "@/lib/auth";
 import { ALL_INTERESTS, BUDGET_LABEL, DIET_OPTIONS, type BudgetLevel, type Pace, type UserProfile } from "@/lib/types";
+import { useI18n } from "@/lib/i18n-react";
+import { LANGS, LANG_NAME, label, type Lang } from "@/lib/i18n";
+import { CURRENCIES, DEFAULT_CURRENCY } from "@/lib/currency";
 import { Chip, PrimaryButton } from "./ui";
 import { cn } from "@/lib/util";
 
 export function ProfileView() {
   const { profile, saveProfile, setAvatar, engine } = useApp();
   const { user, signOut } = useAuth();
+  const { t, lang } = useI18n();
   const [draft, setDraft] = useState<UserProfile>(profile);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -25,16 +29,16 @@ export function ProfileView() {
   const onAvatar = async (file?: File) => {
     if (!file) return;
     setUploading(true); setUploadError(undefined);
-    try { await setAvatar(file); } catch (e) { setUploadError(e instanceof Error ? e.message : "Upload failed"); } finally { setUploading(false); }
+    try { await setAvatar(file); } catch (e) { setUploadError(e instanceof Error ? e.message : t("profile.uploadFailed")); } finally { setUploading(false); }
   };
 
   return (
     <div className="space-y-5 px-5 pt-[max(16px,env(safe-area-inset-top))] pb-8">
-      <h1 className="text-3xl font-bold">Profile</h1>
+      <h1 className="text-3xl font-bold">{t("profile.title")}</h1>
 
       <Section>
         <div className="flex items-center gap-3.5">
-          <button aria-label="Change photo" onClick={() => fileRef.current?.click()} disabled={uploading}
+          <button aria-label={t("profile.changePhoto")} onClick={() => fileRef.current?.click()} disabled={uploading}
             className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full border-2 border-white bg-primary-soft shadow-sm">
             <img src={profile.avatarUrl ?? user?.photoURL ?? "/mascot-avatar.webp"} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
             <span className="absolute inset-0 flex items-center justify-center bg-black/30 text-white opacity-0 transition hover:opacity-100">
@@ -45,48 +49,60 @@ export function ProfileView() {
           <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden
             onChange={(e) => { onAvatar(e.target.files?.[0]); e.target.value = ""; }} />
           <div className="min-w-0 flex-1">
-            <input value={draft.name} onChange={(e) => set("name", e.target.value)} aria-label="Your name" placeholder="Your name"
+            <input value={draft.name} onChange={(e) => set("name", e.target.value)} aria-label={t("profile.yourName")} placeholder={t("profile.yourName")}
               className="w-full bg-transparent text-xl font-bold outline-none" />
-            <div className="truncate text-xs text-ink-2">{user?.email ?? "Travel AI uses this to personalize your plans"}</div>
+            <div className="truncate text-xs text-ink-2">{user?.email ?? t("profile.personalize")}</div>
           </div>
         </div>
         {uploadError && <p role="alert" className="text-sm text-red-600">{uploadError}</p>}
       </Section>
 
-      <Section title="Interests">
+      <Section title={t("profile.languageRegion")}>
+        <Row label={t("profile.language")}>
+          <Segmented options={LANGS.map((l) => [l, LANG_NAME[l]])} value={draft.language ?? lang} onChange={(v) => set("language", v as Lang)} />
+        </Row>
+        <Row label={t("profile.currency")}>
+          <select value={draft.currency ?? DEFAULT_CURRENCY[draft.language ?? lang]} onChange={(e) => set("currency", e.target.value)}
+            aria-label={t("profile.currency")} className="rounded-xl bg-surface px-3 py-2 text-sm outline-none">
+            {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </Row>
+      </Section>
+
+      <Section title={t("profile.interests")}>
         <div className="flex flex-wrap gap-2">
-          {ALL_INTERESTS.map((i) => <Chip key={i} highlighted={draft.interests.includes(i)} onClick={() => toggle(i)}>{i}</Chip>)}
+          {ALL_INTERESTS.map((i) => <Chip key={i} highlighted={draft.interests.includes(i)} onClick={() => toggle(i)}>{label(lang, "interest", i)}</Chip>)}
         </div>
       </Section>
 
-      <Section title="Travel style">
-        <Row label="Budget level">
-          <Segmented options={(Object.keys(BUDGET_LABEL) as BudgetLevel[]).map((b) => [b, BUDGET_LABEL[b]])} value={draft.budgetLevel} onChange={(v) => set("budgetLevel", v as BudgetLevel)} />
+      <Section title={t("profile.style")}>
+        <Row label={t("profile.budget")}>
+          <Segmented options={(Object.keys(BUDGET_LABEL) as BudgetLevel[]).map((b) => [b, t(`budget.${b}`)])} value={draft.budgetLevel} onChange={(v) => set("budgetLevel", v as BudgetLevel)} />
         </Row>
-        <Row label="Pace">
-          <Segmented options={[["relaxed", "Relaxed"], ["packed", "Packed"]]} value={draft.pace} onChange={(v) => set("pace", v as Pace)} />
+        <Row label={t("profile.pace")}>
+          <Segmented options={[["relaxed", t("profile.pace.relaxed")], ["packed", t("profile.pace.packed")]]} value={draft.pace} onChange={(v) => set("pace", v as Pace)} />
         </Row>
-        <Row label="Diet">
+        <Row label={t("profile.diet")}>
           <select value={draft.diet} onChange={(e) => set("diet", e.target.value)} className="rounded-xl bg-surface px-3 py-2 text-sm outline-none">
-            {DIET_OPTIONS.map((d) => <option key={d}>{d}</option>)}
+            {DIET_OPTIONS.map((d) => <option key={d} value={d}>{label(lang, "diet", d)}</option>)}
           </select>
         </Row>
-        <Row label="Home airport">
-          <input value={draft.homeAirport} maxLength={3} aria-label="Home airport"
+        <Row label={t("profile.homeAirport")}>
+          <input value={draft.homeAirport} maxLength={3} aria-label={t("profile.homeAirport")}
             onChange={(e) => set("homeAirport", e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
             className="w-20 rounded-xl bg-surface px-3 py-2 text-center text-sm font-semibold tracking-widest outline-none" />
         </Row>
       </Section>
 
       <PrimaryButton disabled={!dirty && !saved} onClick={async () => { await saveProfile(draft); setSaved(true); }}>
-        {saved && !dirty ? "Saved ✓" : "Save profile"}
+        {saved && !dirty ? t("profile.saved") : t("profile.save")}
       </PrimaryButton>
 
       <button onClick={() => signOut()} className="flex w-full items-center justify-center gap-2 rounded-full bg-white py-3.5 font-semibold text-ink-2 shadow-card">
-        <LogOut className="h-4 w-4" /> Sign out
+        <LogOut className="h-4 w-4" /> {t("profile.signOut")}
       </button>
 
-      <p className="text-center text-xs text-muted">Planner: {engine === "gemini" ? "Gemini" : "Offline demo"}</p>
+      <p className="text-center text-xs text-muted">{t("profile.planner", { engine: engine === "gemini" ? "Gemini" : t("profile.offlineDemo") })}</p>
     </div>
   );
 }

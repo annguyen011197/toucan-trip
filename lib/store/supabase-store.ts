@@ -172,7 +172,7 @@ interface TripRow {
   id: string; owner_id: string; title: string; destination: string | null; origin: string | null;
   start_date: string | null; end_date: string | null; travelers: number | null; budget: string | null; interests: string[];
   status: Trip["status"]; cover_image_url: string | null; hotel: Trip["hotel"] | null; itinerary: Trip["itinerary"];
-  currency: string; created_at: string; updated_at: string;
+  currency: string; language: NonNullable<Trip["language"]>; created_at: string; updated_at: string;
 }
 
 interface MessageRow {
@@ -189,7 +189,7 @@ function rowToTrip(r: TripRow): Trip {
     startDate: r.start_date ?? undefined, endDate: r.end_date ?? undefined,
     travelers: r.travelers ?? undefined, budget: r.budget ?? undefined, interests: r.interests,
     status: r.status, coverImageUrl: r.cover_image_url ?? undefined, hotel: r.hotel ?? undefined,
-    itinerary: r.itinerary ?? [], currency: r.currency,
+    itinerary: r.itinerary ?? [], currency: r.currency, language: r.language ?? "en",
     createdAt: Date.parse(r.created_at), updatedAt: Date.parse(r.updated_at),
   };
 }
@@ -201,7 +201,7 @@ function tripToRow(t: Trip, uid: string): TripRow {
     start_date: t.startDate ?? null, end_date: t.endDate ?? null,
     travelers: t.travelers ?? null, budget: t.budget ?? null, interests: t.interests ?? [],
     status: t.status, cover_image_url: t.coverImageUrl ?? null, hotel: t.hotel ?? null,
-    itinerary: t.itinerary, currency: t.currency,
+    itinerary: t.itinerary, currency: t.currency, language: t.language ?? "en",
     created_at: iso(t.createdAt), updated_at: iso(t.updatedAt),
   };
 }

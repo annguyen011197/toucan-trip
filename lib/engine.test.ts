@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyOps } from "./itinerary-engine";
-import { normalizeTime, parseDates } from "./time";
+import { displayTime, normalizeTime, parseDates } from "./time";
+import { translator } from "./i18n";
+import { convertTripCosts, roundAmount } from "./currency";
 import { ToolExecutor } from "./tools";
 import { mockRespond } from "./engines/mock";
 import { DEFAULT_PROFILE, type Trip } from "./types";
@@ -52,7 +54,7 @@ test("offline chat flow builds, edits and confirms a trip", async () => {
   let trip: Trip = { id: "t", ownerId: "u", title: "New Trip", status: "dreaming", itinerary: [], currency: "USD", createdAt: 0, updatedAt: 0 };
   const say = async (text: string) => {
     const tools = new ToolExecutor(trip);
-    const turn = await mockRespond({ text, trip, history: [], profile: DEFAULT_PROFILE }, tools);
+    const turn = await mockRespond({ text, trip, history: [], profile: DEFAULT_PROFILE, lang: "en" }, tools);
     trip = tools.trip;
     return { turn, tools };
   };
@@ -77,4 +79,22 @@ test("offline chat flow builds, edits and confirms a trip", async () => {
 
   await say("Looks good, confirm!");
   assert.equal(trip.status, "upcoming");
+});
+
+test("change log and times follow the language", () => {
+  const r = applyOps([{ action: "add", day: 1, item: item("Chợ Bến Thành", "2pm") }], [], undefined, "vi");
+  assert.equal(r.changes[0], "Đã thêm Chợ Bến Thành · Ngày 1, 14:00");
+  assert.equal(displayTime("14:00"), "02:00 PM");
+  assert.equal(translator("vi")("chat.moreChanges", { n: 3 }), "+3 thay đổi khác");
+});
+
+test("currency conversion re-prices every stop and rounds per currency", () => {
+  const trip: Trip = {
+    id: "t", ownerId: "u", title: "Kyoto", status: "dreaming", currency: "USD", createdAt: 0, updatedAt: 0,
+    itinerary: applyOps([{ action: "add", day: 1, item: { ...item("Lunch", "12:00"), estCost: 12.4 } }], []).itinerary,
+  };
+  const vnd = convertTripCosts(trip, "VND", 25_987);
+  assert.equal(vnd.currency, "VND");
+  assert.equal(vnd.itinerary[0].items[0].estCost, 322_000);
+  assert.equal(roundAmount(1234.5, "JPY"), 1230);
 });

@@ -52,7 +52,7 @@ async function handleDestination(input: string, profile: UserProfile, tools: Too
   if (lower.includes("something else")) {
     return turn("No problem! Tell me a vibe and I'll find the spot.", ["Beach", "Mountains", "City break", "Food trip"]);
   }
-  if (containsAny(lower, ["surprise", "not sure", "no idea", "don't know", "dont know", "anywhere", "suggest", "idea"])) {
+  if (containsAny(lower, ["surprise", "bất ngờ", "not sure", "no idea", "don't know", "dont know", "anywhere", "suggest", "idea"])) {
     const ideas = suggestions(profile.interests, new Date().getMonth() + 1);
     const list = ideas.map(([n, why]) => `• ${n} — ${why}`).join("\n");
     return turn(`Ooh, a mystery trip! 🧭 Based on your interests and the season, here's where I'd point my beak:\n${list}\n\nWhich one calls to you?`,

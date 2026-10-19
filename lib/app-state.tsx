@@ -11,6 +11,9 @@ import type { PickedImage } from "./images";
 import { greeting } from "./greeting";
 import { applyItinerary } from "./tools";
 import { uid } from "./util";
+import { useI18n } from "./i18n-react";
+import type { Translate } from "./i18n";
+import { DEFAULT_CURRENCY } from "./currency";
 
 export type Tab = "home" | "chat" | "itinerary" | "map" | "profile";
 
@@ -32,8 +35,8 @@ export function botMessage(text: string, quickReplies: string[] = [], cards: Cha
   return msg({ role: "bot", type, text, quickReplies, cards });
 }
 
-const itineraryUpdateMessage = (changes: string[]) =>
-  msg({ role: "bot", type: "itineraryUpdate", text: "", cards: [{ id: uid(), kind: "itineraryUpdate", title: "Itinerary updated", changes }] });
+const itineraryUpdateMessage = (changes: string[], t: Translate) =>
+  msg({ role: "bot", type: "itineraryUpdate", text: "", cards: [{ id: uid(), kind: "itineraryUpdate", title: t("chat.itineraryUpdated"), changes }] });
 
 interface AppContextValue {
   ready: boolean;
@@ -41,6 +44,8 @@ interface AppContextValue {
   uid: string;
   trips: Trip[];
   profile: UserProfile;
+  /** Currency for new trips and conversions (profile choice, else the language's default). */
+  currency: string;
   tab: Tab;
   setTab: (t: Tab) => void;
   selectedTrip?: Trip;
@@ -53,6 +58,8 @@ interface AppContextValue {
   sendChat: (trip: Trip, text: string, history: ChatMessage[]) => Promise<void>;
   /** Summarizes all but the newest messages and deletes the originals from the database. */
   compactChat: (trip: Trip, messages: ChatMessage[]) => Promise<void>;
+  /** Translates the trip into the UI language and re-prices it in `currency` (server-side), then saves it. */
+  convertTrip: (trip: Trip) => Promise<void>;
   saveProfile: (p: UserProfile) => Promise<void>;
   /** Saves an uploaded/generated image on the trip, a stop or the profile (null removes it). Replaced files are deleted. */
   setTripCover: (trip: Trip, image: PickedImage | null) => Promise<void>;
@@ -66,6 +73,7 @@ const SELECTED_KEY = "toucan-trip:selected";
 
 export function AppProvider({ userId, children }: { userId: string; children: ReactNode }) {
   const { user, idToken } = useAuth();
+  const { lang, setLang, t } = useI18n();
   const storeRef = useRef<TripStore | null>(null);
   const [ready, setReady] = useState(false);
   const [engine, setEngine] = useState<AppContextValue["engine"]>("unknown");
@@ -83,6 +91,7 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
       const saved = await store.getProfile();
       if (cancelled) return;
       setProfile({ ...DEFAULT_PROFILE, ...saved, name: saved?.name || user?.displayName || "" });
+      if (saved?.language) setLang(saved.language);
       try { setSelectedId(localStorage.getItem(SELECTED_KEY) ?? undefined); } catch { /* ignore */ }
       let first = true;
       off = store.subscribeTrips((t) => {
@@ -92,7 +101,9 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     })().catch((e) => { console.error(e); setReady(true); });
     fetch("/api/chat").then((r) => r.json()).then((j) => setEngine(j.engine)).catch(() => setEngine("offline"));
     return () => { cancelled = true; off?.(); store.dispose(); };
-  }, [userId]); // `user` only seeds the default name
+  }, [userId]); // `user` only seeds the default name; setLang is stable
+
+  const currency = profile.currency ?? DEFAULT_CURRENCY[lang];
 
   // Keep a valid selection.
   useEffect(() => {
@@ -118,13 +129,15 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
 
   const startNewTrip = useCallback(async () => {
     const now = Date.now();
-    const trip: Trip = { id: uid(), ownerId: userId, title: "New Trip", status: "dreaming", itinerary: [], currency: "USD", createdAt: now, updatedAt: now };
+    const trip: Trip = {
+      id: uid(), ownerId: userId, title: t("common.newTrip"), status: "dreaming", itinerary: [], currency, language: lang, createdAt: now, updatedAt: now,
+    };
     await store().saveTrip(trip);
-    const hello = greeting(trip, profile);
+    const hello = greeting(trip, profile, lang);
     await store().addMessage(trip.id, botMessage(hello.text, hello.quickReplies));
     setSelectedId(trip.id);
     setTab("chat");
-  }, [userId, profile, setTab]);
+  }, [userId, profile, setTab, currency, lang, t]);
 
   const deleteTrip = useCallback(async (id: string) => {
     const trip = trips.find((t) => t.id === id);
@@ -140,31 +153,33 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
 
   /** Itinerary-tab edits: same engine as chat, and the bot posts the itineraryUpdate card. */
   const applyItineraryOps = useCallback(async (trip: Trip, ops: ItineraryOp[]) => {
-    const { trip: next, result } = applyItinerary(trip, ops);
+    const { trip: next, result } = applyItinerary(trip, ops, lang);
     await store().saveTrip(next);
-    if (result.changes.length) await store().addMessage(trip.id, itineraryUpdateMessage(result.changes));
-  }, []);
+    if (result.changes.length) await store().addMessage(trip.id, itineraryUpdateMessage(result.changes, t));
+  }, [lang, t]);
 
   const sendChat = useCallback(async (trip: Trip, text: string, history: ChatMessage[]) => {
     const s = store();
+    // Nothing to convert yet: an empty plan just adopts the current language and currency.
+    if (!trip.itinerary.length) trip = { ...trip, language: lang, currency };
     await s.addMessage(trip.id, msg({ role: "user", type: "text", text }));
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
-        body: JSON.stringify({ text, trip, history: history.slice(-30), profile }),
+        body: JSON.stringify({ text, trip, history: history.slice(-30), profile, lang }),
       });
       const data = (await res.json()) as ChatResponse & { error?: string };
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       await s.saveTrip(data.trip);
       // Update card first, so the reply (with its chips) is always the latest message.
-      if (data.itineraryChanges.length) await s.addMessage(trip.id, itineraryUpdateMessage(data.itineraryChanges));
+      if (data.itineraryChanges.length) await s.addMessage(trip.id, itineraryUpdateMessage(data.itineraryChanges, t));
       await s.addMessage(trip.id, botMessage(data.text, data.quickReplies, data.cards));
       setEngine(data.engine);
     } catch (e) {
-      await s.addMessage(trip.id, botMessage(`Oops, my wings got tangled 🪶 (${e instanceof Error ? e.message : "network error"}). Want to try again?`, [text]));
+      await s.addMessage(trip.id, botMessage(t("chat.error", { error: e instanceof Error ? e.message : t("chat.networkError") }), [text]));
     }
-  }, [profile, idToken]);
+  }, [profile, idToken, lang, currency, t]);
 
   const compactChat = useCallback(async (trip: Trip, messages: ChatMessage[]) => {
     const old = compactable(messages);
@@ -172,17 +187,29 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     const res = await fetch("/api/chat/compact", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
-      body: JSON.stringify({ trip, messages: old }),
+      body: JSON.stringify({ trip, messages: old, lang }),
     });
     const data = (await res.json()) as { text?: string; error?: string };
     if (!res.ok || !data.text) throw new Error(data.error || `HTTP ${res.status}`);
     await store().compactMessages(trip.id, old.map((m) => m.id), msg({ role: "bot", type: "summary", text: data.text }));
-  }, [idToken]);
+  }, [idToken, lang]);
+
+  const convertTrip = useCallback(async (trip: Trip) => {
+    const res = await fetch("/api/trips/convert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+      body: JSON.stringify({ trip, language: lang, currency }),
+    });
+    const data = (await res.json()) as { trip?: Trip; error?: string };
+    if (!res.ok || !data.trip) throw new Error(data.error || `HTTP ${res.status}`);
+    await store().saveTrip(data.trip);
+  }, [idToken, lang, currency]);
 
   const saveProfile = useCallback(async (p: UserProfile) => {
     setProfile(p);
+    if (p.language) setLang(p.language);
     await store().saveProfile(p);
-  }, []);
+  }, [setLang]);
 
   const setTripCover = useCallback(async (trip: Trip, image: PickedImage | null) => {
     await store().saveTrip({ ...trip, coverImageUrl: image?.url, updatedAt: Date.now() });
@@ -212,10 +239,10 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
   }, []);
 
   const value = useMemo<AppContextValue>(() => ({
-    ready, engine, uid: userId, trips, profile, tab, setTab,
-    selectedTrip: trips.find((t) => t.id === selectedId),
-    selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, compactChat, saveProfile, setTripCover, setStopImage, setAvatar,
-  }), [ready, engine, userId, trips, profile, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, saveProfile, setTripCover, setStopImage, setAvatar]);
+    ready, engine, uid: userId, trips, profile, currency, tab, setTab,
+    selectedTrip: trips.find((tr) => tr.id === selectedId),
+    selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
+  }), [ready, engine, userId, trips, profile, currency, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { ChatMessage, Trip } from "@/lib/types";
 import { summarizeChat } from "@/lib/engines/summarize";
 import { AuthError, verifyRequest } from "@/lib/server/auth";
+import { isLang, type Lang } from "@/lib/i18n";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
     if (e instanceof AuthError) return NextResponse.json({ error: "Please sign in again" }, { status: 401 });
     throw e;
   }
-  let body: { trip: Trip; messages: ChatMessage[] };
+  let body: { trip: Trip; messages: ChatMessage[]; lang?: Lang };
   try {
     body = await request.json();
   } catch {
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "trip and messages are required" }, { status: 400 });
   }
   try {
-    const text = await summarizeChat(body.trip, body.messages.slice(-200), process.env.GEMINI_API_KEY);
+    const text = await summarizeChat(body.trip, body.messages.slice(-200), process.env.GEMINI_API_KEY, isLang(body.lang) ? body.lang : "en");
     return NextResponse.json({ text });
   } catch (e) {
     console.error("[chat/compact]", e);

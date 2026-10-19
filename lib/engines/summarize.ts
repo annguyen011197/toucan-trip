@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import type { ChatMessage, Trip } from "../types";
+import { LANG_PROMPT_NAME, type Lang } from "../i18n";
 
 const MAX_WORDS = 120;
 
@@ -10,7 +11,7 @@ const transcript = (messages: ChatMessage[]) =>
     .join("\n");
 
 /** Short memory of the conversation. The itinerary itself lives on the trip, so it isn't repeated here. */
-export async function summarizeChat(trip: Trip, messages: ChatMessage[], apiKey?: string): Promise<string> {
+export async function summarizeChat(trip: Trip, messages: ChatMessage[], apiKey?: string, lang: Lang = "en"): Promise<string> {
   if (!apiKey) return offlineSummary(trip, messages);
   const ai = new GoogleGenAI({ apiKey });
   const res = await ai.models.generateContent({
@@ -20,7 +21,7 @@ export async function summarizeChat(trip: Trip, messages: ChatMessage[], apiKey?
       systemInstruction:
         `Summarize this travel-planning chat so the assistant can continue it later. Trip: ${trip.title}` +
         `${trip.destination ? ` to ${trip.destination}` : ""}. Keep the traveler's preferences, decisions, constraints and open questions. ` +
-        `Don't list the itinerary stops (they're stored separately). Plain text, at most ${MAX_WORDS} words, second person ("You…").`,
+        `Don't list the itinerary stops (they're stored separately). Plain text in ${LANG_PROMPT_NAME[lang]}, at most ${MAX_WORDS} words, second person ("You…").`,
       temperature: 0.2,
     },
   });

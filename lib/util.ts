@@ -23,9 +23,6 @@ export function seededRandom(seed: string) {
   };
 }
 
-export const money = (n: number, currency = "USD") =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
-
 export function cn(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
 }

@@ -4,6 +4,7 @@ import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Compass, Mountain } from "lucide-react";
 import type { TripStatus } from "@/lib/types";
 import { cn } from "@/lib/util";
+import { useI18n } from "@/lib/i18n-react";
 
 export function MascotAvatar({ size = 40, className }: { size?: number; className?: string }) {
   return (
@@ -48,7 +49,8 @@ const STATUS_STYLE: Record<TripStatus, string> = {
 };
 
 export function StatusBadge({ status }: { status: TripStatus }) {
-  return <span className={cn("rounded-full px-3 py-1.5 text-[11px] font-bold tracking-widest uppercase", STATUS_STYLE[status])}>{status}</span>;
+  const { t } = useI18n();
+  return <span className={cn("rounded-full px-3 py-1.5 text-[11px] font-bold tracking-widest uppercase", STATUS_STYLE[status])}>{t(`status.${status}`)}</span>;
 }
 
 export function TagPill({ children }: { children: ReactNode }) {
@@ -85,12 +87,13 @@ export function IconButton({ className, ...props }: ButtonHTMLAttributes<HTMLBut
 }
 
 export function NoTrip({ title, message, onStart }: { title: string; message: string; onStart: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex min-h-[80dvh] flex-col items-center justify-center gap-4 px-8 text-center">
       <img src="/mascot.webp" alt="" className="w-40" />
       <h2 className="text-2xl font-bold">{title}</h2>
       <p className="text-ink-2">{message}</p>
-      <PrimaryButton className="mt-2 max-w-xs" onClick={onStart}><Compass className="h-5 w-5" /> Start your next trip</PrimaryButton>
+      <PrimaryButton className="mt-2 max-w-xs" onClick={onStart}><Compass className="h-5 w-5" /> {t("common.startNextTrip")}</PrimaryButton>
     </div>
   );
 }

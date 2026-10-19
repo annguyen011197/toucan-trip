@@ -1,3 +1,5 @@
+import { LOCALE, translator, type Lang } from "./i18n";
+
 /** Accepts "9", "9am", "9:30 pm", "09:30", "21:05" → "HH:mm" */
 export function normalizeTime(raw: string | undefined | null): string | undefined {
   if (!raw) return undefined;
@@ -17,10 +19,12 @@ export function minutesOf(hhmm: string): number {
   return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : 24 * 60;
 }
 
-export function displayTime(hhmm: string): string {
+/** "09:30 AM" in English; Vietnamese uses the 24h clock ("09:30"). */
+export function displayTime(hhmm: string, lang: Lang = "en"): string {
   const total = minutesOf(hhmm);
   if (total >= 24 * 60) return hhmm;
   const h = Math.floor(total / 60), m = total % 60;
+  if (lang === "vi") return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${String(h12).padStart(2, "0")}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
@@ -50,26 +54,31 @@ export function daysBetween(a: string, b: string): number {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function formatDateRange(start?: string, end?: string): string {
+export function formatDateRange(start?: string, end?: string, lang: Lang = "en"): string {
   const s = parseISODate(start);
-  if (!s) return "Dates TBD";
+  if (!s) return translator(lang)("common.datesTbd");
   const e = parseISODate(end);
+  if (lang === "vi") {
+    const fmt = (d: Date) => d.toLocaleDateString(LOCALE.vi, { day: "numeric", month: "short" }); // "12 thg 3"
+    if (!e) return fmt(s);
+    return `${e.getMonth() === s.getMonth() && e.getFullYear() === s.getFullYear() ? s.getDate() : fmt(s)} - ${fmt(e)}`;
+  }
   const left = `${MONTHS[s.getMonth()]} ${s.getDate()}`;
   if (!e) return left;
   const right = e.getMonth() === s.getMonth() && e.getFullYear() === s.getFullYear() ? `${e.getDate()}` : `${MONTHS[e.getMonth()]} ${e.getDate()}`;
   return `${left} - ${right}`;
 }
 
-export function formatLongDate(iso?: string): string {
+export function formatLongDate(iso?: string, lang: Lang = "en"): string {
   const d = parseISODate(iso);
   if (!d) return "";
-  return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  return d.toLocaleDateString(LOCALE[lang], { weekday: "long", month: "long", day: "numeric" });
 }
 
-export function monthName(offset: number): string {
+export function monthName(offset: number, lang: Lang = "en"): string {
   const d = new Date();
   d.setMonth(d.getMonth() + offset);
-  return MONTHS[d.getMonth()];
+  return lang === "vi" ? `tháng ${d.getMonth() + 1}` : MONTHS[d.getMonth()];
 }
 
 /** Tiny natural-language date parser for the offline engine. */

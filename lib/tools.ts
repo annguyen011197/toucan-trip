@@ -3,15 +3,19 @@ import { applyOps, EngineResult } from "./itinerary-engine";
 import { findCity } from "./mock-data";
 import { addDays, parseISODate } from "./time";
 import * as search from "./search";
+import { roundAmount } from "./currency";
 import { uid } from "./util";
+import { translator, type Lang } from "./i18n";
 
 /** Applies an updateTripInfo patch (pure). */
 export function applyTripInfo(trip: Trip, patch: TripInfoPatch): Trip {
   const t: Trip = { ...trip, itinerary: trip.itinerary };
   if (patch.destination?.trim()) {
-    const city = findCity(patch.destination);
-    t.destination = city?.name ?? patch.destination.trim();
-    if (!t.title || t.title === "New Trip") t.title = `${t.destination.split(",")[0]} Adventure`;
+    t.destination = findCity(patch.destination)?.name ?? patch.destination.trim();
+    const city = t.destination.split(",")[0];
+    if (!t.title || t.title === translator("en")("common.newTrip") || t.title === translator("vi")("common.newTrip")) {
+      t.title = t.language === "vi" ? `Khám phá ${city}` : `${city} Adventure`;
+    }
   }
   if (patch.title?.trim()) t.title = patch.title.trim();
   if (patch.origin?.trim()) t.origin = patch.origin.trim();
@@ -26,8 +30,8 @@ export function applyTripInfo(trip: Trip, patch: TripInfoPatch): Trip {
   return t;
 }
 
-export function applyItinerary(trip: Trip, ops: ItineraryOp[]): { trip: Trip; result: EngineResult } {
-  const result = applyOps(ops, trip.itinerary, trip.startDate);
+export function applyItinerary(trip: Trip, ops: ItineraryOp[], lang?: Lang): { trip: Trip; result: EngineResult } {
+  const result = applyOps(ops, trip.itinerary, trip.startDate, lang ?? trip.language);
   return { trip: { ...trip, itinerary: result.itinerary, updatedAt: Date.now() }, result };
 }
 
@@ -60,7 +64,11 @@ export class ToolExecutor {
   cards: Card[] = [];
   itineraryChanges: string[] = [];
 
-  constructor(trip: Trip) {
+  /**
+   * @param lang language of the change log (the user's chat language).
+   * @param costScale multiplies new/edited `estCost`s — for engines that price in USD while the trip uses another currency.
+   */
+  constructor(trip: Trip, private lang?: Lang, private costScale = 1) {
     this.trip = structuredClone(trip);
   }
 
@@ -70,7 +78,10 @@ export class ToolExecutor {
   }
 
   updateItinerary(ops: ItineraryOp[]): EngineResult {
-    const { trip, result } = applyItinerary(this.trip, ops);
+    if (this.costScale !== 1) {
+      ops = ops.map((op) => (op.item?.estCost ? { ...op, item: { ...op.item, estCost: roundAmount(op.item.estCost * this.costScale, this.trip.currency) } } : op));
+    }
+    const { trip, result } = applyItinerary(this.trip, ops, this.lang);
     this.trip = trip;
     this.itineraryChanges.push(...result.changes);
     return result;
@@ -123,6 +134,7 @@ export class ToolExecutor {
 export function snapshot(t: Trip) {
   return {
     title: t.title, destination: t.destination, origin: t.origin, startDate: t.startDate, endDate: t.endDate,
+    language: t.language ?? "en", currency: t.currency,
     travelers: t.travelers, budget: t.budget, interests: t.interests, status: t.status, hotel: t.hotel?.name,
     itinerary: t.itinerary.map((d) => ({
       day: d.day, date: d.date,

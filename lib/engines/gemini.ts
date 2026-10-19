@@ -4,6 +4,7 @@ import { BUDGET_LABEL, ITEM_CATEGORIES } from "../types";
 import { ToolExecutor, snapshot } from "../tools";
 import { toISODate } from "../time";
 import type { BotTurn } from "./mock";
+import { LANG_PROMPT_NAME, type Lang } from "../i18n";
 
 /**
  * Gemini with function calling. Runs only on the server (API route), so GEMINI_API_KEY never reaches the browser.
@@ -16,14 +17,14 @@ import type { BotTurn } from "./mock";
  */
 const MAX_ROUNDS = 6;
 
-export function systemPrompt(profile: UserProfile): string {
+export function systemPrompt(profile: UserProfile, lang: Lang = "en", tripLang: Lang = "en", currency = "USD"): string {
   return `You are "Travel AI", a friendly toucan travel planner inside the Toucan Trip app.
 Persona: warm, lightly playful (an occasional bird pun or 🐦 is fine), concise — 1-3 short sentences per reply.
 
 Follow this flow, using the [trip state] JSON to see what is already known:
 1. Ask for the destination. If the user has none, suggest 2-3 options based on vibe, season, and budget.
 2. Collect origin, dates, travelers, budget and interests — one or two questions per turn. Save each answer with updateTripInfo as soon as you get it.
-3. When destination, dates and interests are known and the itinerary is empty, generate a draft itinerary with ONE updateItinerary call (3-5 items per day, realistic 24h "HH:mm" times, accurate lat/lng, address, category, estCost in USD per person), then ask what to adjust.
+3. When destination, dates and interests are known and the itinerary is empty, generate a draft itinerary with ONE updateItinerary call (3-5 items per day, realistic 24h "HH:mm" times, accurate lat/lng, address, category, estCost in ${currency} per person), then ask what to adjust.
 4. Apply edits the user asks for (e.g. "add Kinkaku-ji at 9am on Day 2") with updateItinerary. Use itemId from the trip state for remove/move/edit.
 5. Offer flights, hotels and restaurants with searchFlights / searchHotels / searchPlaces. The app shows their results as cards automatically — don't repeat prices in your text.
 6. When the user confirms the plan, call updateTripInfo with status "upcoming".
@@ -32,6 +33,8 @@ Rules:
 - Never invent prices, availability, flight numbers or ratings. They may only come from tool results.
 - Dates are "yyyy-MM-dd". Times are 24h "HH:mm".
 - ALWAYS end every turn by calling \`reply\` with your message and 2-4 short quick replies (chips) whenever choices make sense.
+- Write \`reply\` text and quick replies in ${LANG_PROMPT_NAME[lang]}.
+- Write itinerary item titles, notes and tags in ${LANG_PROMPT_NAME[tripLang]} (the language of this trip's plan), and every estCost in ${currency}.
 
 User profile (personalize with it):
 - Name: ${profile.name || "unknown"}
@@ -56,7 +59,7 @@ const itemSchema: Schema = {
     lng: { type: Type.NUMBER },
     note: S("One-line tip"),
     category: { type: Type.STRING, enum: ITEM_CATEGORIES },
-    estCost: { type: Type.NUMBER, description: "Estimated cost per person in USD" },
+    estCost: { type: Type.NUMBER, description: "Estimated cost per person, in the trip's currency" },
   },
 };
 
@@ -167,7 +170,7 @@ export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKe
       model,
       contents,
       config: {
-        systemInstruction: systemPrompt(req.profile),
+        systemInstruction: systemPrompt(req.profile, req.lang, req.trip.language ?? "en", req.trip.currency || "USD"),
         tools: [{ functionDeclarations: declarations }],
         toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY } },
         temperature: 0.7,

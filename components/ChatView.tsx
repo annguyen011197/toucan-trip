@@ -5,29 +5,34 @@ import { ArrowRight, BedDouble, CalendarCheck, CalendarDays, ChevronDown, FoldVe
 import { COMPACT_EVERY, compactable, useApp } from "@/lib/app-state";
 import type { Card, ChatMessage, Trip } from "@/lib/types";
 import { displayTime } from "@/lib/time";
-import { money, cn } from "@/lib/util";
+import { cn } from "@/lib/util";
+import { money } from "@/lib/currency";
+import { useI18n } from "@/lib/i18n-react";
+import { LOCALE, translator, type Lang } from "@/lib/i18n";
 import { Chip, MascotAvatar } from "./ui";
 
-export function shareText(trip: Trip) {
+export function shareText(trip: Trip, lang: Lang = "en") {
+  const t = translator(lang);
   const lines = [`${trip.title} — ${trip.destination ?? "TBD"}`];
   for (const d of trip.itinerary) {
-    lines.push("", `Day ${d.day}`);
-    for (const i of d.items) lines.push(`• ${displayTime(i.time)}  ${i.title}`);
+    lines.push("", t("share.day", { n: d.day }));
+    for (const i of d.items) lines.push(`• ${displayTime(i.time, lang)}  ${i.title}`);
   }
-  lines.push("", "Planned with Toucan Trip 🐦");
+  lines.push("", t("share.footer"));
   return lines.join("\n");
 }
 
-export async function shareTrip(trip: Trip) {
-  const text = shareText(trip);
+export async function shareTrip(trip: Trip, lang: Lang = "en") {
+  const text = shareText(trip, lang);
   try {
     if (navigator.share) await navigator.share({ title: trip.title, text });
-    else { await navigator.clipboard.writeText(text); alert("Itinerary copied to clipboard"); }
+    else { await navigator.clipboard.writeText(text); alert(translator(lang)("share.copied")); }
   } catch { /* cancelled */ }
 }
 
 export function ChatView({ tripId }: { tripId: string }) {
   const { trips, subscribeMessages, sendChat, compactChat, setTab } = useApp();
+  const { t, lang } = useI18n();
   const trip = trips.find((t) => t.id === tripId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -66,7 +71,7 @@ export function ChatView({ tripId }: { tripId: string }) {
       await compactChat(trip, messages);
     } catch (e) {
       if (auto) { autoFailedAt.current = messages.length; console.error("[compact]", e); }
-      else alert(`Couldn't compact the chat: ${e instanceof Error ? e.message : "unknown error"}`);
+      else alert(t("chat.compactFailed", { error: e instanceof Error ? e.message : t("common.somethingWrong") }));
     } finally {
       compactingRef.current = false;
       setCompacting(false);
@@ -82,7 +87,7 @@ export function ChatView({ tripId }: { tripId: string }) {
   const compactCount = compactable(messages).length;
   const manualCompact = () => {
     setMenu(false);
-    if (confirm(`Summarize ${compactCount} older messages and delete them? This can't be undone.`)) compact(false);
+    if (confirm(t("chat.confirmCompact", { n: compactCount }))) compact(false);
   };
 
   const send = async (raw: string) => {
@@ -103,19 +108,19 @@ export function ChatView({ tripId }: { tripId: string }) {
       <header className="flex items-center gap-3 border-b border-line/70 px-4 pt-[max(10px,env(safe-area-inset-top))] pb-2.5">
         <MascotAvatar size={48} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-xl font-bold">{trip?.title ?? "New Trip"}</div>
-          <div className="text-[13px] text-ink-2">AI-Powered Planning</div>
+          <div className="truncate text-xl font-bold">{trip?.title ?? t("common.newTrip")}</div>
+          <div className="text-[13px] text-ink-2">{t("chat.subtitle")}</div>
         </div>
-        <button aria-label="Share" onClick={() => trip && shareTrip(trip)} className="flex h-11 w-11 items-center justify-center rounded-full bg-surface"><Share2 className="h-5 w-5" /></button>
+        <button aria-label={t("common.share")} onClick={() => trip && shareTrip(trip, lang)} className="flex h-11 w-11 items-center justify-center rounded-full bg-surface"><Share2 className="h-5 w-5" /></button>
         <div className="relative">
-          <button aria-label="More" onClick={() => setMenu((m) => !m)} className="flex h-11 w-11 items-center justify-center rounded-full bg-surface"><MoreHorizontal className="h-5 w-5" /></button>
+          <button aria-label={t("common.more")} onClick={() => setMenu((m) => !m)} className="flex h-11 w-11 items-center justify-center rounded-full bg-surface"><MoreHorizontal className="h-5 w-5" /></button>
           {menu && (
             <div className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-2xl bg-white py-1 shadow-card">
-              <MenuItem icon={<CalendarDays className="h-4 w-4" />} onClick={() => setTab("itinerary")}>View itinerary</MenuItem>
-              <MenuItem icon={<MapIcon className="h-4 w-4" />} onClick={() => setTab("map")}>Show on map</MenuItem>
-              <MenuItem icon={<FoldVertical className="h-4 w-4" />} onClick={manualCompact} disabled={compacting || compactCount < 2}>Compact chat</MenuItem>
+              <MenuItem icon={<CalendarDays className="h-4 w-4" />} onClick={() => setTab("itinerary")}>{t("chat.viewItinerary")}</MenuItem>
+              <MenuItem icon={<MapIcon className="h-4 w-4" />} onClick={() => setTab("map")}>{t("chat.showOnMap")}</MenuItem>
+              <MenuItem icon={<FoldVertical className="h-4 w-4" />} onClick={manualCompact} disabled={compacting || compactCount < 2}>{t("chat.compact")}</MenuItem>
               {trip?.status === "dreaming" && (
-                <MenuItem icon={<BadgeCheck className="h-4 w-4" />} onClick={() => { setMenu(false); send("Looks good, confirm!"); }}>Confirm trip</MenuItem>
+                <MenuItem icon={<BadgeCheck className="h-4 w-4" />} onClick={() => { setMenu(false); send(t("chat.confirmTripText")); }}>{t("chat.confirmTrip")}</MenuItem>
               )}
             </div>
           )}
@@ -125,7 +130,7 @@ export function ChatView({ tripId }: { tripId: string }) {
       {/* Messages */}
       <div className="no-scrollbar flex-1 space-y-[18px] overflow-y-auto px-4 pb-2" onClick={() => setMenu(false)}>
         {first && (
-          <div className="pt-4 text-center text-xs font-semibold tracking-[0.12em] text-muted uppercase">{timestamp(first.createdAt)}</div>
+          <div className="pt-4 text-center text-xs font-semibold tracking-[0.12em] text-muted uppercase">{timestamp(first.createdAt, lang)}</div>
         )}
         {messages.map((m) => (
           <MessageRow key={m.id} message={m} onAction={(c) => c.actionText && send(c.actionText)} onOpenItinerary={() => setTab("itinerary")} />
@@ -133,7 +138,7 @@ export function ChatView({ tripId }: { tripId: string }) {
         {thinking && <TypingRow />}
         {compacting && (
           <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Compacting earlier messages…
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("chat.compacting")}
           </div>
         )}
         {chips.length > 0 && (
@@ -148,9 +153,9 @@ export function ChatView({ tripId }: { tripId: string }) {
       <form className="border-t border-line/60 bg-white px-4 py-2.5" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
         <div className="flex items-end gap-2 rounded-[26px] border border-line bg-bg py-1.5 pr-1.5 pl-5">
           <textarea ref={inputRef} rows={1} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown}
-            placeholder="Ask Travel AI..." aria-label="Message"
+            placeholder={t("chat.placeholder")} aria-label={t("chat.message")}
             className="no-scrollbar min-w-0 flex-1 resize-none self-center bg-transparent py-1.5 text-base leading-6 outline-none placeholder:text-muted" />
-          <button type="submit" aria-label="Send" disabled={!draft.trim() || thinking}
+          <button type="submit" aria-label={t("chat.send")} disabled={!draft.trim() || thinking}
             className="flex h-10 w-10 items-center justify-center rounded-full text-primary transition disabled:text-muted">
             <SendHorizontal className="h-6 w-6" fill="currentColor" />
           </button>
@@ -169,18 +174,19 @@ function MenuItem({ icon, children, onClick, disabled }: { icon: React.ReactNode
   );
 }
 
-function timestamp(ms: number) {
+function timestamp(ms: number, lang: Lang) {
   const d = new Date(ms);
   const today = new Date().toDateString() === d.toDateString();
-  const day = today ? "Today" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  return `${day}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+  const day = today ? translator(lang)("chat.today") : d.toLocaleDateString(LOCALE[lang], { month: "short", day: "numeric" });
+  return `${day}, ${d.toLocaleTimeString(LOCALE[lang], { hour: "numeric", minute: "2-digit" })}`;
 }
 
 function MessageRow({ message, onAction, onOpenItinerary }: { message: ChatMessage; onAction: (c: Card) => void; onOpenItinerary: () => void }) {
+  const { t } = useI18n();
   if (message.role === "user") {
     return (
       <div className="rise flex flex-col items-end gap-1.5">
-        <span className="pr-[52px] text-sm text-ink-2">You</span>
+        <span className="pr-[52px] text-sm text-ink-2">{t("chat.you")}</span>
         <div className="flex items-end gap-2.5 pl-10">
           <div className="rounded-[20px] rounded-br-md bg-primary px-4 py-3 leading-relaxed whitespace-pre-wrap text-white">{message.text}</div>
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#FDE7D4] text-cta"><User className="h-4 w-4" fill="currentColor" /></span>
@@ -211,13 +217,14 @@ function MessageRow({ message, onAction, onOpenItinerary }: { message: ChatMessa
 }
 
 function SummaryCard({ text }: { text: string }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   return (
     <div className="rise mx-6 rounded-2xl border border-dashed border-line bg-bg px-4 py-3">
       <button onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="flex w-full items-center gap-2 text-left text-xs font-semibold tracking-wider text-ink-2 uppercase">
         <FoldVertical className="h-3.5 w-3.5" />
-        <span className="flex-1">Earlier messages compacted</span>
+        <span className="flex-1">{t("chat.compacted")}</span>
         <ChevronDown className={cn("h-4 w-4 transition", open && "rotate-180")} />
       </button>
       {open && <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap text-ink-2">{text}</p>}
@@ -226,13 +233,14 @@ function SummaryCard({ text }: { text: string }) {
 }
 
 function UpdateCard({ card, onOpen }: { card: Card; onOpen: () => void }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const changes = card.changes ?? [];
   const shown = expanded ? changes : changes.slice(0, 4);
   return (
     <div className="rise pl-[46px]">
       <div className="max-w-[300px] rounded-bubble border border-primary/15 bg-primary-soft p-4">
-        <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4 text-primary" /> {card.title}</div>
+        <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4 text-primary" /> {t("chat.itineraryUpdated")}</div>
         <ul className="mt-2 space-y-1.5">
           {shown.map((ch, i) => (
             <li key={i} className="flex gap-2 text-sm text-ink-2"><span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />{ch}</li>
@@ -240,16 +248,17 @@ function UpdateCard({ card, onOpen }: { card: Card; onOpen: () => void }) {
         </ul>
         {changes.length > 4 && (
           <button onClick={() => setExpanded((e) => !e)} className="mt-1.5 pl-3.5 text-sm text-ink-2 underline-offset-2 hover:underline">
-            {expanded ? "Show less" : `+${changes.length - 4} more changes`}
+            {expanded ? t("chat.showLess") : t("chat.moreChanges", { n: changes.length - 4 })}
           </button>
         )}
-        <button onClick={onOpen} className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-cta">View itinerary <ArrowRight className="h-4 w-4" /></button>
+        <button onClick={onOpen} className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-cta">{t("chat.viewItinerary")} <ArrowRight className="h-4 w-4" /></button>
       </div>
     </div>
   );
 }
 
 function ResultCard({ card, onAction }: { card: Card; onAction: () => void }) {
+  const { t, lang } = useI18n();
   const Icon = card.kind === "flight" ? Plane : card.kind === "hotel" ? BedDouble : Utensils;
   return (
     <div className="flex w-[230px] shrink-0 flex-col gap-2 rounded-bubble bg-white p-3.5 shadow-card ring-1 ring-line/60">
@@ -260,14 +269,14 @@ function ResultCard({ card, onAction }: { card: Card; onAction: () => void }) {
       {card.subtitle && <div className="truncate text-[13px] text-ink-2">{card.subtitle}</div>}
       {card.detail && <div className="line-clamp-2 text-[13px] text-ink-2">{card.detail}</div>}
       <div className="mt-auto flex items-baseline gap-2">
-        {!!card.price && <span className="text-[17px] font-bold">{money(card.price, card.currency)}</span>}
+        {!!card.price && <span className="text-[17px] font-bold">{money(card.price, card.currency, lang)}</span>}
         {card.rating && <span className="flex items-center gap-0.5 text-xs font-semibold text-tertiary"><Star className="h-3 w-3" fill="currentColor" />{card.rating.toFixed(1)}</span>}
         <span className="flex-1" />
-        {card.isSample && <span className="text-[10px] font-bold tracking-widest text-muted">SAMPLE</span>}
+        {card.isSample && <span className="text-[10px] font-bold tracking-widest text-muted">{t("chat.sample")}</span>}
       </div>
       {card.actionText && (
         <button onClick={onAction} className="rounded-full bg-primary-soft py-2 text-sm font-semibold text-cta transition active:scale-95">
-          {card.kind === "place" ? "Add to trip" : "Choose"}
+          {card.kind === "place" ? t("chat.addToTrip") : t("chat.choose")}
         </button>
       )}
     </div>
@@ -275,8 +284,9 @@ function ResultCard({ card, onAction }: { card: Card; onAction: () => void }) {
 }
 
 function TypingRow() {
+  const { t } = useI18n();
   return (
-    <div className="flex items-end gap-2.5" aria-label="Travel AI is typing">
+    <div className="flex items-end gap-2.5" aria-label={t("chat.typing")}>
       <MascotAvatar size={36} />
       <div className="flex gap-1.5 rounded-bubble bg-surface px-4 py-4">
         {[0, 1, 2].map((i) => <span key={i} className={cn("typing-dot h-2 w-2 rounded-full bg-muted")} style={{ animationDelay: `${i * 0.15}s` }} />)}

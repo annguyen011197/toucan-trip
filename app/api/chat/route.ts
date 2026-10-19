@@ -5,6 +5,8 @@ import { mockRespond } from "@/lib/engines/mock";
 import { geminiRespond } from "@/lib/engines/gemini";
 import { AuthError, verifyRequest } from "@/lib/server/auth";
 import { addPlaceImages } from "@/lib/server/place-images";
+import { exchangeRate } from "@/lib/server/rates";
+import { isLang } from "@/lib/i18n";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -33,10 +35,13 @@ export async function POST(request: Request) {
   }
   body.text = body.text.slice(0, 2000);
   body.history = Array.isArray(body.history) ? body.history.slice(-40) : [];
+  if (!isLang(body.lang)) body.lang = "en";
 
-  const tools = new ToolExecutor(body.trip);
   const apiKey = process.env.GEMINI_API_KEY;
   try {
+    // Gemini prices in the trip's currency; the offline engine's sample data is in USD.
+    const costScale = apiKey || !body.trip.currency || body.trip.currency === "USD" ? 1 : await exchangeRate("USD", body.trip.currency);
+    const tools = new ToolExecutor(body.trip, body.lang, costScale);
     const turn = apiKey ? await geminiRespond(body, tools, apiKey) : await mockRespond(body, tools);
     const res: ChatResponse = {
       text: turn.text,

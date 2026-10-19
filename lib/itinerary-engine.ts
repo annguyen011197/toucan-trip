@@ -1,6 +1,7 @@
 import type { ItemCategory, ItineraryDay, ItineraryItem, ItineraryItemPatch, ItineraryOp } from "./types";
 import { addDays, minutesOf, normalizeTime, displayTime } from "./time";
 import { uid } from "./util";
+import { translator, type Lang } from "./i18n";
 
 export interface EngineResult {
   itinerary: ItineraryDay[];
@@ -24,7 +25,10 @@ export function lenientCategory(raw?: string): ItemCategory {
 const clone = (days: ItineraryDay[]): ItineraryDay[] => days.map((d) => ({ ...d, items: d.items.map((i) => ({ ...i })) }));
 
 /** Pure itinerary mutations. Every write path (chat tools, drag-to-reorder) goes through here. */
-export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDate?: string): EngineResult {
+/** `lang` is the language of the change log shown in chat. */
+export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDate?: string, lang: Lang = "en"): EngineResult {
+  const t = translator(lang);
+  const time = (hhmm: string) => displayTime(hhmm, lang);
   const days = clone(itinerary);
   const changes: string[] = [];
   const failures: string[] = [];
@@ -76,14 +80,14 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
         const item = makeItem(op.item, title);
         ensureDay(Math.max(1, op.day));
         insertSorted(item, Math.max(1, op.day));
-        changes.push(`Added ${item.title} · Day ${op.day}, ${displayTime(item.time)}`);
+        changes.push(t("change.added", { title: item.title, day: op.day, time: time(item.time) }));
         break;
       }
       case "remove": {
         const loc = locate(op);
         if (!loc) { failures.push(`Couldn't find ${op.item?.title ?? op.itemId ?? "item"} to remove`); break; }
         const [removed] = loc.d.items.splice(loc.idx, 1);
-        changes.push(`Removed ${removed.title} from Day ${loc.d.day}`);
+        changes.push(t("change.removed", { title: removed.title, day: loc.d.day }));
         break;
       }
       case "edit": {
@@ -93,8 +97,8 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
         const oldTime = item.time;
         const before = { title: item.title, lat: item.lat, lng: item.lng };
         const p = op.item;
-        const t = normalizeTime(p.time);
-        if (t) item.time = t;
+        const nt = normalizeTime(p.time);
+        if (nt) item.time = nt;
         if (op.itemId && p.title) item.title = p.title; // title is the locator unless targeting by id
         if (p.placeId !== undefined) item.placeId = p.placeId;
         if (p.address !== undefined) item.address = p.address;
@@ -111,15 +115,17 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
         }
         if (p.tags !== undefined) item.tags = p.tags;
         insertSorted(item, loc.d.day);
-        changes.push(`${item.title} ${item.time !== oldTime ? `moved to ${displayTime(item.time)}` : "updated"} · Day ${loc.d.day}`);
+        changes.push(item.time !== oldTime
+          ? t("change.movedTime", { title: item.title, time: time(item.time), day: loc.d.day })
+          : t("change.updated", { title: item.title, day: loc.d.day }));
         break;
       }
       case "move": {
         const loc = locate(op);
         if (!loc) { failures.push(`Couldn't find ${op.item?.title ?? op.itemId ?? "item"} to move`); break; }
         const [item] = loc.d.items.splice(loc.idx, 1);
-        const t = normalizeTime(op.item?.time);
-        if (t) item.time = t;
+        const nt = normalizeTime(op.item?.time);
+        if (nt) item.time = nt;
         const fromDay = loc.d.day;
         const target = op.toDay ?? fromDay;
         ensureDay(target);
@@ -129,10 +135,10 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
           // Keep time slots ascending: items take over slots in their new order.
           const slots = td.items.map((i) => i.time).sort((a, b) => minutesOf(a) - minutesOf(b));
           td.items.forEach((i, idx) => { i.time = slots[idx]; });
-          changes.push(fromDay === target ? `Reordered ${item.title} on Day ${target}` : `Moved ${item.title} to Day ${target}`);
+          changes.push(t(fromDay === target ? "change.reordered" : "change.movedDay", { title: item.title, day: target }));
         } else {
           insertSorted(item, target);
-          changes.push(`Moved ${item.title} to Day ${target}, ${displayTime(item.time)}`);
+          changes.push(t("change.movedDayTime", { title: item.title, day: target, time: time(item.time) }));
         }
         break;
       }

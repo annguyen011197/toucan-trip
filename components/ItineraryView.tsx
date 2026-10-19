@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Camera, Check, Footprints, ImagePlus, GripVertical, Lightbulb, Map as MapIcon, MapPin, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, WandSparkles, X } from "lucide-react";
+import { ArrowLeft, Camera, Check, Footprints, Languages, ImagePlus, GripVertical, Lightbulb, Map as MapIcon, MapPin, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, WandSparkles, X } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -11,20 +11,46 @@ import { TRIP_STATUSES, type ItineraryItem, type Trip } from "@/lib/types";
 import { dayCost, googleMapsUrl, travelLeg } from "@/lib/itinerary-engine";
 import { findCity } from "@/lib/mock-data";
 import { displayTime, formatDateRange, formatLongDate } from "@/lib/time";
-import { cn, money } from "@/lib/util";
+import { cn } from "@/lib/util";
+import { money } from "@/lib/currency";
+import { useI18n } from "@/lib/i18n-react";
 import { PrimaryButton, RemoteImage } from "./ui";
 import { shareTrip } from "./ChatView";
 import { ImagePicker } from "./ImagePicker";
+import { ConvertDialog, conversionFor, type Conversion } from "./ConvertDialog";
+
+const DISMISSED_KEY = "toucan-trip:convert-dismissed";
+
+/** Convert offers the user said "Not now" to, per trip + target (this device only). */
+function readDismissed(): string[] {
+  try { return JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "[]") as string[]; } catch { return []; }
+}
 
 const TripMap = dynamic(() => import("./TripMap"), { ssr: false, loading: () => <div className="h-full w-full animate-pulse bg-surface" /> });
 
 export function ItineraryView({ trip }: { trip: Trip }) {
-  const { setTab, applyItinerary, setStatus, setTripCover, setStopImage } = useApp();
+  const { setTab, applyItinerary, setStatus, setTripCover, setStopImage, currency, convertTrip } = useApp();
+  const { t, lang } = useI18n();
   const [picker, setPicker] = useState<{ kind: "cover" } | { kind: "stop"; item: ItineraryItem }>();
   const [selectedDay, setSelectedDay] = useState(1);
   const [menu, setMenu] = useState(false);
   const day = trip.itinerary.find((d) => d.day === selectedDay);
   const city = findCity(trip.destination);
+
+  // Offer to convert a plan made in another language/currency: a popup once, then a button under the hero.
+  const conversion = trip.itinerary.length ? conversionFor(trip, lang, currency) : undefined;
+  const [dismissed, setDismissed] = useState(readDismissed);
+  // The offer being shown. Held apart from `conversion`: saving updates the trip optimistically, which clears
+  // `conversion` mid-save, and a failed save must keep the dialog (and its error) open.
+  const [offer, setOffer] = useState<Conversion>();
+  useEffect(() => { if (conversion && !dismissed.includes(conversion.key)) setOffer(conversion); }, [conversion?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const closeConvert = () => {
+    setOffer(undefined);
+    if (!offer || dismissed.includes(offer.key)) return;
+    const next = [...dismissed, offer.key].slice(-50);
+    setDismissed(next);
+    try { localStorage.setItem(DISMISSED_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
 
   useEffect(() => {
     if (!trip.itinerary.some((d) => d.day === selectedDay)) setSelectedDay(trip.itinerary[0]?.day ?? 1);
@@ -50,20 +76,20 @@ export function ItineraryView({ trip }: { trip: Trip }) {
     <div className="min-h-dvh bg-white">
       {/* Nav */}
       <header className="sticky top-0 z-[500] flex items-center border-b border-line/70 bg-white/95 px-3 pt-[max(8px,env(safe-area-inset-top))] pb-2 backdrop-blur">
-        <button aria-label="Back" onClick={() => setTab("home")} className="flex h-10 w-10 items-center justify-center"><ArrowLeft className="h-5 w-5" /></button>
+        <button aria-label={t("common.back")} onClick={() => setTab("home")} className="flex h-10 w-10 items-center justify-center"><ArrowLeft className="h-5 w-5" /></button>
         <div className="flex-1 text-center">
           <div className="text-[17px] font-bold">{trip.title}</div>
-          <div className="text-[11px] font-semibold tracking-[0.15em] text-primary">AI GENERATED</div>
+          <div className="text-[11px] font-semibold tracking-[0.15em] text-primary">{t("itin.aiGenerated")}</div>
         </div>
         <div className="relative">
-          <button aria-label="Trip status" onClick={() => setMenu((m) => !m)} className="flex h-10 w-10 items-center justify-center"><MoreVertical className="h-5 w-5" /></button>
+          <button aria-label={t("itin.tripStatus")} onClick={() => setMenu((m) => !m)} className="flex h-10 w-10 items-center justify-center"><MoreVertical className="h-5 w-5" /></button>
           {menu && (
             <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-2xl bg-white py-1 shadow-card ring-1 ring-line/60">
-              <div className="px-4 pt-2 pb-1 text-[11px] font-bold tracking-widest text-muted uppercase">Status</div>
+              <div className="px-4 pt-2 pb-1 text-[11px] font-bold tracking-widest text-muted uppercase">{t("itin.status")}</div>
               {TRIP_STATUSES.map((s) => (
                 <button key={s} onClick={() => { setMenu(false); setStatus(trip, s); }}
-                  className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm capitalize hover:bg-surface">
-                  {s} {trip.status === s && <Check className="h-4 w-4 text-primary" />}
+                  className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-surface">
+                  {t(`status.${s}`)} {trip.status === s && <Check className="h-4 w-4 text-primary" />}
                 </button>
               ))}
             </div>
@@ -76,26 +102,33 @@ export function ItineraryView({ trip }: { trip: Trip }) {
         <div className="relative mx-5 h-[180px] overflow-hidden rounded-card shadow-[0_6px_16px_rgb(0_0_0/0.12)]">
           <RemoteImage src={trip.coverImageUrl} seed={trip.id} className="absolute inset-0" />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent from-30% to-black/60" />
-          <button aria-label="Change cover photo" onClick={() => setPicker({ kind: "cover" })}
+          <button aria-label={t("itin.changeCover")} onClick={() => setPicker({ kind: "cover" })}
             className="absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-ink-2 backdrop-blur">
             <Camera className="h-4 w-4" />
           </button>
           <div className="absolute bottom-4 left-5 text-white">
-            <div className="text-2xl font-bold">{trip.destination ?? "Destination TBD"}</div>
-            <div className="text-sm opacity-90">{formatDateRange(trip.startDate, trip.endDate).replace(" - ", " — ")}</div>
+            <div className="text-2xl font-bold">{trip.destination ?? t("common.destinationTbd")}</div>
+            <div className="text-sm opacity-90">{formatDateRange(trip.startDate, trip.endDate, lang).replace(" - ", " — ")}</div>
           </div>
         </div>
 
         <div className="mx-5 flex gap-3">
-          <PrimaryButton color="primary" onClick={() => setTab("chat")}><WandSparkles className="h-5 w-5" /> Continue Planning</PrimaryButton>
-          <button aria-label="Share" onClick={() => shareTrip(trip)} className="flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary"><Share2 className="h-5 w-5" /></button>
+          <PrimaryButton color="primary" onClick={() => setTab("chat")}><WandSparkles className="h-5 w-5" /> {t("itin.continue")}</PrimaryButton>
+          <button aria-label={t("common.share")} onClick={() => shareTrip(trip, lang)} className="flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary"><Share2 className="h-5 w-5" /></button>
         </div>
+
+        {conversion && !offer && (
+          <button onClick={() => setOffer(conversion)}
+            className="mx-5 flex w-[calc(100%-40px)] items-center justify-center gap-2 rounded-full border border-primary/25 bg-primary-soft/60 py-2.5 text-sm font-semibold text-primary">
+            <Languages className="h-4 w-4" /> {t("convert.offer", { target: conversion.target })}
+          </button>
+        )}
 
         {trip.itinerary.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-8 py-8 text-center">
             <img src="/mascot.webp" alt="" className="w-28" />
-            <div className="font-semibold">Your plan is still a blank map</div>
-            <p className="text-sm text-ink-2">Answer a few questions in Chat and I&apos;ll draft your days.</p>
+            <div className="font-semibold">{t("itin.blankTitle")}</div>
+            <p className="text-sm text-ink-2">{t("itin.blankMessage")}</p>
           </div>
         ) : (
           <>
@@ -105,7 +138,7 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                 <button key={d.day} onClick={() => setSelectedDay(d.day)} aria-pressed={d.day === selectedDay}
                   className={cn("flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-2xl transition",
                     d.day === selectedDay ? "bg-primary text-white shadow-[0_6px_14px_rgb(26_127_232/0.35)]" : "bg-surface text-ink-2")}>
-                  <span className="text-[10px] font-semibold tracking-widest">DAY</span>
+                  <span className="text-[10px] font-semibold tracking-widest">{t("itin.day")}</span>
                   <span className="text-xl font-bold">{String(d.day).padStart(2, "0")}</span>
                 </button>
               ))}
@@ -113,11 +146,11 @@ export function ItineraryView({ trip }: { trip: Trip }) {
 
             <div className="border-t border-line px-5 pt-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold">Daily Itinerary</h2>
-                <button onClick={() => setTab("map")} className="flex items-center gap-1.5 text-sm font-semibold text-primary"><MapIcon className="h-4 w-4" fill="currentColor" fillOpacity={0.2} /> View Route</button>
+                <h2 className="text-xl font-bold">{t("itin.daily")}</h2>
+                <button onClick={() => setTab("map")} className="flex items-center gap-1.5 text-sm font-semibold text-primary"><MapIcon className="h-4 w-4" fill="currentColor" fillOpacity={0.2} /> {t("itin.viewRoute")}</button>
               </div>
-              {day?.date && <div className="mt-1 text-[13px] text-ink-2">{formatLongDate(day.date)}</div>}
-              <div className="mt-0.5 text-xs text-muted">Drag to reorder · tap × to remove</div>
+              {day?.date && <div className="mt-1 text-[13px] text-ink-2">{formatLongDate(day.date, lang)}</div>}
+              <div className="mt-0.5 text-xs text-muted">{t("itin.dragHint")}</div>
             </div>
 
             {/* Timeline */}
@@ -127,13 +160,13 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                   <SortableContext items={day.items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
                     {day.items.map((item, idx) => (
                       <TimelineRow key={item.id} item={item} first={idx === 0} last={idx === day.items.length - 1}
-                        next={day.items[idx + 1]} destination={trip.destination} onRemove={() => remove(item)}
+                        next={day.items[idx + 1]} destination={trip.destination} currency={trip.currency} onRemove={() => remove(item)}
                         onImage={() => setPicker({ kind: "stop", item })} />
                     ))}
                   </SortableContext>
                 </DndContext>
               ) : (
-                <p className="py-6 text-sm text-ink-2">Nothing planned for this day yet — ask Travel AI to add something.</p>
+                <p className="py-6 text-sm text-ink-2">{t("itin.nothingToday")}</p>
               )}
             </div>
 
@@ -141,22 +174,22 @@ export function ItineraryView({ trip }: { trip: Trip }) {
             <div className="mx-5 rounded-card bg-surface p-[18px]">
               <div className="flex justify-between">
                 <div>
-                  <div className="text-[11px] font-bold tracking-widest text-ink-2">DAY {selectedDay} EST.</div>
-                  <div className="text-xl font-bold">{money(dayCost(day), trip.currency)}</div>
+                  <div className="text-[11px] font-bold tracking-widest text-ink-2">{t("itin.dayEst", { n: selectedDay })}</div>
+                  <div className="text-xl font-bold">{money(dayCost(day), trip.currency, lang)}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-[11px] font-bold tracking-widest text-ink-2">ESTIMATED TOTAL</div>
-                  <div className="text-xl font-bold text-primary">{money(trip.itinerary.reduce((s, d) => s + dayCost(d), 0), trip.currency)}</div>
+                  <div className="text-[11px] font-bold tracking-widest text-ink-2">{t("itin.total")}</div>
+                  <div className="text-xl font-bold text-primary">{money(trip.itinerary.reduce((s, d) => s + dayCost(d), 0), trip.currency, lang)}</div>
                 </div>
               </div>
-              <div className="mt-2 text-[11px] text-muted">Activities &amp; food per person · excludes flights and hotel</div>
+              <div className="mt-2 text-[11px] text-muted">{t("itin.costNote")}</div>
             </div>
           </>
         )}
 
         {city?.tip && (
           <div className="mx-5 rounded-card border border-primary/12 bg-primary-soft/60 p-5">
-            <div className="flex items-center gap-2 font-semibold text-primary"><Lightbulb className="h-5 w-5" fill="currentColor" fillOpacity={0.25} /> AI Travel Tip</div>
+            <div className="flex items-center gap-2 font-semibold text-primary"><Lightbulb className="h-5 w-5" fill="currentColor" fillOpacity={0.25} /> {t("itin.tip")}</div>
             <p className="mt-2.5 text-sm leading-relaxed text-ink-2 italic">“{city.tip}”</p>
           </div>
         )}
@@ -168,15 +201,19 @@ export function ItineraryView({ trip }: { trip: Trip }) {
             </div>
             <button onClick={() => setTab("map")}
               className="absolute top-1/2 left-1/2 z-[450] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-ink px-5 py-3 text-[15px] font-semibold text-white">
-              <SquareArrowOutUpRight className="h-4 w-4" /> Explore Map
+              <SquareArrowOutUpRight className="h-4 w-4" /> {t("itin.exploreMap")}
             </button>
           </div>
         )}
       </div>
 
+      {offer && (
+        <ConvertDialog trip={trip} conversion={offer} onClose={closeConvert}
+          onConvert={async () => { await convertTrip(trip); setOffer(undefined); }} />
+      )}
       {picker?.kind === "cover" && (
-        <ImagePicker title="Trip cover" folder="covers" current={trip.coverImageUrl} onClose={() => setPicker(undefined)}
-          defaultPrompt={`Scenic view of ${place}`} onPick={(img) => setTripCover(trip, img)} />
+        <ImagePicker title={t("itin.tripCover")} folder="covers" current={trip.coverImageUrl} onClose={() => setPicker(undefined)}
+          defaultPrompt={t("itin.coverPrompt", { place })} onPick={(img) => setTripCover(trip, img)} />
       )}
       {picker?.kind === "stop" && (
         <ImagePicker title={picker.item.title} folder="stops" current={picker.item.imageUrl} onClose={() => setPicker(undefined)}
@@ -187,9 +224,10 @@ export function ItineraryView({ trip }: { trip: Trip }) {
   );
 }
 
-function TimelineRow({ item, first, last, next, destination, onRemove, onImage }: {
-  item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; destination?: string; onRemove: () => void; onImage: () => void;
+function TimelineRow({ item, first, last, next, destination, currency, onRemove, onImage }: {
+  item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; destination?: string; currency: string; onRemove: () => void; onImage: () => void;
 }) {
+  const { t, lang } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
   const leg = next ? travelLeg(item, next) : undefined;
   return (
@@ -202,15 +240,15 @@ function TimelineRow({ item, first, last, next, destination, onRemove, onImage }
       </div>
       <div className={cn("min-w-0 flex-1", last ? "pb-4" : "pb-6")} {...attributes} {...listeners} style={{ touchAction: "manipulation" }}>
         <div className="flex items-center gap-2">
-          <span className={cn("text-xs font-semibold", first ? "text-primary" : "text-muted")}>{displayTime(item.time)}</span>
+          <span className={cn("text-xs font-semibold", first ? "text-primary" : "text-muted")}>{displayTime(item.time, lang)}</span>
           <GripVertical className="h-3.5 w-3.5 text-muted/60" />
           <span className="flex-1" />
-          {item.estCost > 0 && <span className="text-xs font-medium text-ink-2">{money(item.estCost)}</span>}
-          <button aria-label={`Photo for ${item.title}`} onPointerDown={(e) => e.stopPropagation()} onClick={onImage}
+          {item.estCost > 0 && <span className="text-xs font-medium text-ink-2">{money(item.estCost, currency, lang)}</span>}
+          <button aria-label={t("itin.photoFor", { title: item.title })} onPointerDown={(e) => e.stopPropagation()} onClick={onImage}
             className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
             <ImagePlus className="h-3.5 w-3.5" />
           </button>
-          <button aria-label={`Remove ${item.title}`} onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
+          <button aria-label={t("itin.remove", { title: item.title })} onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
             className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
             <X className="h-3.5 w-3.5" />
           </button>
@@ -219,7 +257,7 @@ function TimelineRow({ item, first, last, next, destination, onRemove, onImage }
         <a href={googleMapsUrl(item, destination)} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => e.stopPropagation()}
           className="mt-1 flex w-fit max-w-full items-start gap-1 text-[13px] font-medium text-primary hover:underline">
           <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0">{item.address ?? "Open in Google Maps"}</span>
+          <span className="min-w-0">{item.address ?? t("itin.openMaps")}</span>
         </a>
         {item.note && <p className="mt-1 text-sm leading-relaxed text-ink-2">{item.note}</p>}
         {item.imageUrl && <RemoteImage src={item.imageUrl} seed={item.id} alt={item.title} className="mt-2.5 h-[120px] rounded-2xl" />}
@@ -235,7 +273,7 @@ function TimelineRow({ item, first, last, next, destination, onRemove, onImage }
         {leg && (
           <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-muted">
             {leg.mode === "walk" ? <Footprints className="h-3.5 w-3.5" /> : <TramFront className="h-3.5 w-3.5" />}
-            {leg.minutes} min {leg.mode} to next stop
+            {t(leg.mode === "walk" ? "itin.leg.walk" : "itin.leg.transit", { n: leg.minutes })}
           </div>
         )}
       </div>

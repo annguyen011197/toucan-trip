@@ -1,3 +1,5 @@
+import type { Lang } from "./i18n";
+
 export type TripStatus = "dreaming" | "upcoming" | "ongoing" | "past";
 export const TRIP_STATUSES: TripStatus[] = ["dreaming", "upcoming", "ongoing", "past"];
 
@@ -55,7 +57,10 @@ export interface Trip {
   coverImageUrl?: string;
   hotel?: Place;
   itinerary: ItineraryDay[];
+  /** Currency of every `estCost` in the itinerary. */
   currency: string;
+  /** Language the itinerary text was written in (trips from before this field are English). */
+  language?: Lang;
   createdAt: number;
   updatedAt: number;
 }
@@ -106,6 +111,10 @@ export interface UserProfile {
   homeAirport: string;
   /** Supabase Storage URL */
   avatarUrl?: string;
+  /** UI + planner language; unset until chosen (the browser language is used meanwhile). */
+  language?: Lang;
+  /** Currency for new trips and conversions; unset → the language's default. */
+  currency?: string;
 }
 
 export const DEFAULT_PROFILE: UserProfile = {
@@ -178,6 +187,8 @@ export interface ChatRequest {
   trip: Trip;
   history: ChatMessage[];
   profile: UserProfile;
+  /** Language the user is chatting in. */
+  lang: Lang;
 }
 
 export interface ChatResponse {
@@ -188,4 +199,11 @@ export interface ChatResponse {
   trip: Trip;
   itineraryChanges: string[];
   engine: "gemini" | "offline";
+}
+
+/** /api/trips/convert contract */
+export interface ConvertRequest {
+  trip: Trip;
+  language: Lang;
+  currency: string;
 }

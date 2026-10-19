@@ -10,6 +10,7 @@ import { MapScreen } from "@/components/MapScreen";
 import { ProfileView } from "@/components/ProfileView";
 import { SignInView } from "@/components/SignInView";
 import { NoTrip } from "@/components/ui";
+import { I18nProvider, useI18n } from "@/lib/i18n-react";
 
 function Splash() {
   return (
@@ -21,19 +22,20 @@ function Splash() {
 
 function Screen() {
   const { ready, tab, selectedTrip, startNewTrip, setTab } = useApp();
+  const { t } = useI18n();
   if (!ready) return <Splash />;
   switch (tab) {
     case "home":
       return <HomeView />;
     case "chat":
       return selectedTrip ? <ChatView key={selectedTrip.id} tripId={selectedTrip.id} />
-        : <NoTrip title="No trip yet" message="Start a trip and I'll plan it with you, one question at a time." onStart={() => startNewTrip()} />;
+        : <NoTrip title={t("empty.chat.title")} message={t("empty.chat.message")} onStart={() => startNewTrip()} />;
     case "itinerary":
       return selectedTrip ? <ItineraryView trip={selectedTrip} />
-        : <NoTrip title="No itinerary yet" message="Chat with Travel AI and your day-by-day plan will appear here." onStart={() => startNewTrip()} />;
+        : <NoTrip title={t("empty.itinerary.title")} message={t("empty.itinerary.message")} onStart={() => startNewTrip()} />;
     case "map":
       return selectedTrip && selectedTrip.itinerary.length ? <MapScreen trip={selectedTrip} />
-        : <NoTrip title="Nothing to map yet" message="Once your itinerary has stops, I'll pin them here with the route between them."
+        : <NoTrip title={t("empty.map.title")} message={t("empty.map.message")}
             onStart={() => (selectedTrip ? setTab("chat") : startNewTrip())} />;
     case "profile":
       return <ProfileView />;
@@ -58,8 +60,10 @@ function Gate() {
 
 export default function Page() {
   return (
-    <AuthProvider>
-      <Gate />
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider>
+        <Gate />
+      </AuthProvider>
+    </I18nProvider>
   );
 }

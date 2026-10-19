@@ -7,10 +7,12 @@ import type { Trip } from "@/lib/types";
 import { googleMapsUrl, hasLocation, travelLeg } from "@/lib/itinerary-engine";
 import { displayTime } from "@/lib/time";
 import { cn } from "@/lib/util";
+import { useI18n } from "@/lib/i18n-react";
 
 const TripMap = dynamic(() => import("./TripMap"), { ssr: false, loading: () => <div className="h-full w-full animate-pulse bg-surface" /> });
 
 export function MapScreen({ trip }: { trip: Trip }) {
+  const { t, lang } = useI18n();
   const [day, setDay] = useState(trip.itinerary[0]?.day ?? 1);
   const [focused, setFocused] = useState<string | undefined>();
   const items = (trip.itinerary.find((d) => d.day === day)?.items ?? []).filter(hasLocation);
@@ -29,7 +31,7 @@ export function MapScreen({ trip }: { trip: Trip }) {
           <button key={d.day} onClick={() => { setDay(d.day); setFocused(undefined); }}
             className={cn("shrink-0 rounded-full px-4 py-2.5 text-sm font-semibold shadow-[0_2px_8px_rgb(0_0_0/0.12)]",
               d.day === day ? "bg-primary text-white" : "bg-white text-ink")}>
-            Day {d.day}
+            {t("map.day", { n: d.day })}
           </button>
         ))}
       </div>
@@ -40,7 +42,7 @@ export function MapScreen({ trip }: { trip: Trip }) {
           <div className="flex w-[220px] shrink-0 items-center gap-3 rounded-[20px] bg-white p-3.5 shadow-card">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-tertiary text-white"><BedDouble className="h-4 w-4" /></span>
             <div className="min-w-0">
-              <div className="text-xs font-semibold text-tertiary">Your stay</div>
+              <div className="text-xs font-semibold text-tertiary">{t("map.yourStay")}</div>
               <div className="truncate text-[15px] font-semibold">{trip.hotel.name}</div>
             </div>
           </div>
@@ -53,16 +55,16 @@ export function MapScreen({ trip }: { trip: Trip }) {
               <button onClick={() => setFocused(it.id)} className="flex min-w-0 flex-1 items-center gap-3 p-3.5 pr-1 text-left">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[15px] font-bold text-white">{idx + 1}</span>
                 <div className="min-w-0">
-                  <div className="text-xs font-semibold text-primary">{displayTime(it.time)}</div>
+                  <div className="text-xs font-semibold text-primary">{displayTime(it.time, lang)}</div>
                   <div className="truncate text-[15px] font-semibold">{it.title}</div>
                   {leg && (
                     <div className="flex items-center gap-1 text-[11px] text-muted">
-                      {leg.mode === "walk" ? <Footprints className="h-3 w-3" /> : <TramFront className="h-3 w-3" />} {leg.minutes} min to next
+                      {leg.mode === "walk" ? <Footprints className="h-3 w-3" /> : <TramFront className="h-3 w-3" />} {t("map.toNext", { n: leg.minutes })}
                     </div>
                   )}
                 </div>
               </button>
-              <a href={googleMapsUrl(it, trip.destination)} target="_blank" rel="noopener noreferrer" aria-label={`Open ${it.title} in Google Maps`}
+              <a href={googleMapsUrl(it, trip.destination)} target="_blank" rel="noopener noreferrer" aria-label={t("map.openInMaps", { title: it.title })}
                 className="mr-2.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary">
                 <MapPin className="h-4 w-4" />
               </a>
