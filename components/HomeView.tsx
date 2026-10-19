@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Bell, CalendarDays, Compass, Loader2, MoreHorizontal, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, Bell, CalendarDays, Compass, Loader2, LogOut, MoreHorizontal, Sparkles, Trash2, Users } from "lucide-react";
 import { useApp } from "@/lib/app-state";
 import { formatDateRange } from "@/lib/time";
 import type { Trip } from "@/lib/types";
@@ -10,7 +10,7 @@ import { cn } from "@/lib/util";
 import { useI18n } from "@/lib/i18n-react";
 
 export function HomeView() {
-  const { trips, startNewTrip, selectTrip, selectedTrip, engine, deleteTrip, setTab } = useApp();
+  const { trips, startNewTrip, selectTrip, selectedTrip, engine, removeTrip, isOwner, setTab } = useApp();
   const { t } = useI18n();
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -60,15 +60,18 @@ export function HomeView() {
         <h2 className="text-[22px] font-bold">{t("home.myItinerary")}</h2>
         {trips.length === 0 && <p className="text-ink-2">{t("home.noTrips")}</p>}
         {trips.map((tr) => (
-          <TripCard key={tr.id} trip={tr} selected={tr.id === selectedTrip?.id} onOpen={() => selectTrip(tr.id)}
-            onDelete={() => { if (confirm(t("home.confirmDelete", { title: tr.title }))) deleteTrip(tr.id); }} />
+          <TripCard key={tr.id} trip={tr} shared={!isOwner(tr)} selected={tr.id === selectedTrip?.id} onOpen={() => selectTrip(tr.id)}
+            onDelete={() => {
+              if (!confirm(t(isOwner(tr) ? "home.confirmDelete" : "home.confirmLeave", { title: tr.title }))) return;
+              removeTrip(tr).catch((e) => alert(e instanceof Error ? e.message : t("common.somethingWrong")));
+            }} />
         ))}
       </section>
     </div>
   );
 }
 
-function TripCard({ trip, selected, onOpen, onDelete }: { trip: Trip; selected: boolean; onOpen: () => void; onDelete: () => void }) {
+function TripCard({ trip, shared, selected, onOpen, onDelete }: { trip: Trip; shared: boolean; selected: boolean; onOpen: () => void; onDelete: () => void }) {
   const { t, lang } = useI18n();
   return (
     <div className="relative">
@@ -77,10 +80,17 @@ function TripCard({ trip, selected, onOpen, onDelete }: { trip: Trip; selected: 
         className={cn("group cursor-pointer overflow-hidden rounded-card bg-white shadow-card transition active:scale-[0.99]", trip.status === "past" && "opacity-70")}>
         <div className="relative h-[200px]">
           <RemoteImage src={trip.coverImageUrl} seed={trip.id} className="absolute inset-0" />
-          <div className="absolute top-4 left-4"><StatusBadge status={trip.status} /></div>
-          <button aria-label={t("home.deleteTrip")} onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          <div className="absolute top-4 left-4 flex gap-2">
+            <StatusBadge status={trip.status} />
+            {shared && (
+              <span className="flex items-center gap-1 rounded-full bg-white/85 px-3 py-1.5 text-[11px] font-bold tracking-widest text-primary uppercase backdrop-blur">
+                <Users className="h-3.5 w-3.5" /> {t("home.shared")}
+              </span>
+            )}
+          </div>
+          <button aria-label={t(shared ? "home.leaveTrip" : "home.deleteTrip")} onClick={(e) => { e.stopPropagation(); onDelete(); }}
             className="absolute top-4 right-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-ink-2 opacity-0 backdrop-blur transition group-hover:opacity-100 focus:opacity-100">
-            <Trash2 className="h-4 w-4" />
+            {shared ? <LogOut className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
           </button>
         </div>
         <div className="flex items-center gap-3 p-5">

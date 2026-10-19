@@ -1,13 +1,14 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import type { ChatMessage, Trip, UserProfile } from "../types";
+import type { ChatMessage, CommentStatus, Trip, TripComment, TripMember, UserProfile } from "../types";
 import { supabase } from "../supabase";
 import type { TripStore, Unsubscribe } from "./types";
 
 /**
  * Supabase Postgres store (see supabase/migrations). RLS scopes every query to the Firebase uid.
  *   profiles(id = uid, preferences jsonb)
- *   trips(owner_id = uid, itinerary jsonb)
- *   messages(trip_id, created_at, seq) — append-only, except compaction (older messages → one summary)
+ *   trips(owner_id = uid, itinerary jsonb) — plus trips shared with the user (trip_members), read-only
+ *   messages(trip_id, created_at, seq) — owner only; append-only, except compaction (older messages → one summary)
+ *   trip_members, trip_share_links, trip_comments — sharing and per-stop comments
  * Writes update a local cache first so the UI is instant; Realtime keeps other tabs/devices in sync.
  */
 export class SupabaseStore implements TripStore {
@@ -17,6 +18,9 @@ export class SupabaseStore implements TripStore {
   private messages = new Map<string, ChatMessage[]>();
   private msgSubs = new Map<string, Set<(m: ChatMessage[]) => void>>();
   private msgChannels = new Map<string, RealtimeChannel>();
+  private comments = new Map<string, TripComment[]>();
+  private commentSubs = new Map<string, Set<(c: TripComment[]) => void>>();
+  private commentChannels = new Map<string, RealtimeChannel>();
 
   constructor(private uid: string) {}
 
@@ -26,10 +30,14 @@ export class SupabaseStore implements TripStore {
     this.tripSubs.add(cb);
     if (this.trips) cb(this.trips);
     else this.loadTrips();
+    // Unfiltered: RLS already limits events to the user's own trips and the ones shared with them.
     this.tripChannel ??= supabase()
       .channel(`trips:${this.uid}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "trips", filter: `owner_id=eq.${this.uid}` }, () => this.loadTrips())
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "trips", filter: `owner_id=eq.${this.uid}` }, () => this.loadTrips())
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "trips" }, () => this.loadTrips())
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "trips" }, () => this.loadTrips())
+      // Someone shared a trip with this user (UPDATE: an email invite was claimed).
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "trip_members", filter: `user_id=eq.${this.uid}` }, () => this.loadTrips())
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "trip_members", filter: `user_id=eq.${this.uid}` }, () => this.loadTrips())
       // DELETE events can't be filtered and only carry the primary key under RLS.
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "trips" }, (p) => this.dropTrip((p.old as { id?: string }).id))
       .subscribe();
@@ -62,6 +70,117 @@ export class SupabaseStore implements TripStore {
     this.dropTrip(id);
     const { error } = await supabase().from("trips").delete().eq("id", id);
     if (error) { await this.loadTrips(); throw new Error(error.message); }
+  }
+
+  refreshTrips() {
+    return this.loadTrips();
+  }
+
+  // ───────────── comments ─────────────
+
+  subscribeComments(tripId: string, cb: (comments: TripComment[]) => void): Unsubscribe {
+    const subs = this.commentSubs.get(tripId) ?? new Set();
+    subs.add(cb);
+    this.commentSubs.set(tripId, subs);
+    const cached = this.comments.get(tripId);
+    if (cached) cb(cached);
+    else this.loadComments(tripId);
+    if (!this.commentChannels.has(tripId)) {
+      const upsert = (p: { new: unknown }) => this.upsertComment(tripId, rowToComment(p.new as CommentRow));
+      this.commentChannels.set(tripId, supabase()
+        .channel(`comments:${tripId}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "trip_comments", filter: `trip_id=eq.${tripId}` }, upsert)
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "trip_comments", filter: `trip_id=eq.${tripId}` }, upsert)
+        // DELETE events can't be filtered and only carry the primary key under RLS.
+        .on("postgres_changes", { event: "DELETE", schema: "public", table: "trip_comments" },
+          (p) => this.dropComment(tripId, (p.old as { id?: string }).id))
+        .subscribe());
+    }
+    return () => {
+      subs.delete(cb);
+      if (subs.size) return;
+      const ch = this.commentChannels.get(tripId);
+      if (ch) supabase().removeChannel(ch);
+      this.commentChannels.delete(tripId);
+      this.comments.delete(tripId);
+    };
+  }
+
+  private async loadComments(tripId: string) {
+    const { data, error } = await supabase().from("trip_comments").select("*").eq("trip_id", tripId).order("created_at");
+    if (error) { console.error("[supabase] comments", error); return; }
+    const loaded = (data as CommentRow[]).map(rowToComment);
+    const ids = new Set(loaded.map((c) => c.id));
+    this.setComments(tripId, [...loaded, ...(this.comments.get(tripId) ?? []).filter((c) => !ids.has(c.id))]);
+  }
+
+  private setComments(tripId: string, list: TripComment[]) {
+    list = [...list].sort((a, b) => a.createdAt - b.createdAt);
+    this.comments.set(tripId, list);
+    this.commentSubs.get(tripId)?.forEach((cb) => cb(list));
+  }
+
+  private upsertComment(tripId: string, comment: TripComment) {
+    const list = this.comments.get(tripId) ?? [];
+    this.setComments(tripId, [...list.filter((c) => c.id !== comment.id), comment]);
+  }
+
+  private dropComment(tripId: string, id?: string) {
+    const list = this.comments.get(tripId);
+    if (id && list?.some((c) => c.id === id)) this.setComments(tripId, list.filter((c) => c.id !== id));
+  }
+
+  async addComment(comment: TripComment) {
+    this.upsertComment(comment.tripId, comment);
+    const { error } = await supabase().from("trip_comments").insert(commentToRow(comment));
+    if (error) { this.dropComment(comment.tripId, comment.id); throw new Error(error.message); }
+  }
+
+  async deleteComment(comment: TripComment) {
+    this.dropComment(comment.tripId, comment.id);
+    const { error } = await supabase().from("trip_comments").delete().eq("id", comment.id);
+    if (error) { await this.loadComments(comment.tripId); throw new Error(error.message); }
+  }
+
+  async setCommentStatus(tripId: string, ids: string[], status: CommentStatus) {
+    if (!ids.length) return;
+    const resolvedAt = status === "open" ? undefined : Date.now();
+    for (const c of this.comments.get(tripId) ?? []) if (ids.includes(c.id)) this.upsertComment(tripId, { ...c, status, resolvedAt });
+    const { error } = await supabase().from("trip_comments")
+      .update({ status, resolved_at: resolvedAt ? iso(resolvedAt) : null }).eq("trip_id", tripId).in("id", ids);
+    if (error) { await this.loadComments(tripId); throw new Error(error.message); }
+  }
+
+  // ───────────── members + share link ─────────────
+
+  async listMembers(tripId: string) {
+    const { data, error } = await supabase().from("trip_members").select("*").eq("trip_id", tripId).order("created_at");
+    if (error) throw new Error(error.message);
+    return (data as MemberRow[]).map(rowToMember);
+  }
+
+  async removeMember(member: TripMember) {
+    const { error } = await supabase().from("trip_members").delete().eq("id", member.id);
+    if (error) throw new Error(error.message);
+    if (member.userId === this.uid) this.dropTrip(member.tripId); // left the trip
+  }
+
+  async getShareToken(tripId: string) {
+    const { data, error } = await supabase().from("trip_share_links").select("token").eq("trip_id", tripId).maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data?.token as string | undefined) ?? undefined;
+  }
+
+  async resetShareToken(tripId: string, enabled: boolean) {
+    if (!enabled) {
+      const { error } = await supabase().from("trip_share_links").delete().eq("trip_id", tripId);
+      if (error) throw new Error(error.message);
+      return undefined;
+    }
+    const token = randomToken();
+    const { error } = await supabase().from("trip_share_links").upsert({ trip_id: tripId, token, created_at: new Date().toISOString() });
+    if (error) throw new Error(error.message);
+    return token;
   }
 
   // ───────────── messages ─────────────
@@ -161,8 +280,11 @@ export class SupabaseStore implements TripStore {
     if (this.tripChannel) sb.removeChannel(this.tripChannel);
     this.msgChannels.forEach((ch) => sb.removeChannel(ch));
     this.msgChannels.clear();
+    this.commentChannels.forEach((ch) => sb.removeChannel(ch));
+    this.commentChannels.clear();
     this.tripSubs.clear();
     this.msgSubs.clear();
+    this.commentSubs.clear();
   }
 }
 
@@ -180,7 +302,23 @@ interface MessageRow {
   quick_replies: string[]; cards: ChatMessage["cards"]; created_at: string;
 }
 
+interface CommentRow {
+  id: string; trip_id: string; item_id: string; day: number | null; item_title: string; author_id: string; author_name: string;
+  text: string; status: TripComment["status"]; resolved_at: string | null; created_at: string;
+}
+
+interface MemberRow {
+  id: string; trip_id: string; user_id: string | null; email: string | null; display_name: string | null;
+  role: TripMember["role"]; created_at: string;
+}
+
 const iso = (ms: number) => new Date(ms).toISOString();
+
+/** 144-bit URL-safe share-link token. */
+function randomToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(18));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_");
+}
 
 function rowToTrip(r: TripRow): Trip {
   return {
@@ -214,5 +352,27 @@ function messageToRow(m: ChatMessage, tripId: string, uid: string): MessageRow {
   return {
     id: m.id, trip_id: tripId, owner_id: uid, role: m.role, type: m.type, text: m.text,
     quick_replies: m.quickReplies, cards: m.cards, created_at: iso(m.createdAt),
+  };
+}
+
+function rowToComment(r: CommentRow): TripComment {
+  return {
+    id: r.id, tripId: r.trip_id, itemId: r.item_id, day: r.day ?? undefined, itemTitle: r.item_title,
+    authorId: r.author_id, authorName: r.author_name, text: r.text, status: r.status,
+    createdAt: Date.parse(r.created_at), resolvedAt: r.resolved_at ? Date.parse(r.resolved_at) : undefined,
+  };
+}
+
+function commentToRow(c: TripComment): Omit<CommentRow, "resolved_at"> {
+  return {
+    id: c.id, trip_id: c.tripId, item_id: c.itemId, day: c.day ?? null, item_title: c.itemTitle,
+    author_id: c.authorId, author_name: c.authorName, text: c.text, status: "open", created_at: iso(c.createdAt),
+  };
+}
+
+function rowToMember(r: MemberRow): TripMember {
+  return {
+    id: r.id, tripId: r.trip_id, userId: r.user_id ?? undefined, email: r.email ?? undefined,
+    displayName: r.display_name ?? undefined, role: r.role, createdAt: Date.parse(r.created_at),
   };
 }

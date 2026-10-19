@@ -144,7 +144,8 @@ async function generateDraft(profile: UserProfile, tools: ToolExecutor): Promise
 }
 
 // ── Step 5+: edits, searches, confirmation
-async function handleEdit(input: string, tools: ToolExecutor): Promise<BotTurn> {
+/** Free-text itinerary edits ("add X at 9am on Day 2", "remove X"). Also used to apply approved comments offline. */
+export async function handleEdit(input: string, tools: ToolExecutor): Promise<BotTurn> {
   const lower = input.toLowerCase();
   const trip = tools.trip;
   const dest = trip.destination ?? "";

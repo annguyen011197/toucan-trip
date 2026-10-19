@@ -21,13 +21,18 @@ function Splash() {
 }
 
 function Screen() {
-  const { ready, tab, selectedTrip, startNewTrip, setTab } = useApp();
+  const { ready, tab, selectedTrip, startNewTrip, setTab, isOwner } = useApp();
   const { t } = useI18n();
   if (!ready) return <Splash />;
   switch (tab) {
     case "home":
       return <HomeView />;
     case "chat":
+      // Planning chat is the owner's; people a trip is shared with comment on the itinerary instead.
+      if (selectedTrip && !isOwner(selectedTrip)) {
+        return <NoTrip title={t("empty.sharedChat.title")} message={t("empty.sharedChat.message")}
+          action={t("empty.sharedChat.action")} onStart={() => setTab("itinerary")} />;
+      }
       return selectedTrip ? <ChatView key={selectedTrip.id} tripId={selectedTrip.id} />
         : <NoTrip title={t("empty.chat.title")} message={t("empty.chat.message")} onStart={() => startNewTrip()} />;
     case "itinerary":

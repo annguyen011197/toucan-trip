@@ -20,10 +20,27 @@ export async function POST(request: Request) {
       last_sign_in_at: new Date().toISOString(),
     });
     if (error) throw new Error(error.message);
+    // Email invites sent before this person had an account. Verified emails only, so nobody can claim
+    // someone else's invite by signing up with their address.
+    if (user.email && user.email_verified) {
+      await claimInvites(user.uid, user.email.toLowerCase(), (user.name as string | undefined) ?? null);
+    }
     return NextResponse.json({ refreshToken });
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: 401 });
     console.error("[auth/sync]", e);
     return NextResponse.json({ error: "Sync failed" }, { status: 500 });
+  }
+}
+
+async function claimInvites(uid: string, email: string, name: string | null) {
+  const db = supabaseAdmin();
+  const { data: pending, error } = await db.from("trip_members").select("id").is("user_id", null).eq("email", email);
+  if (error) { console.error("[auth/sync] invites", error); return; }
+  for (const { id } of pending ?? []) {
+    const { error: claimError } = await db.from("trip_members").update({ user_id: uid, display_name: name }).eq("id", id);
+    // 23505: already a member of that trip (e.g. joined by link first), so the invite is redundant.
+    if (claimError?.code === "23505") await db.from("trip_members").delete().eq("id", id);
+    else if (claimError) console.error("[auth/sync] claim invite", claimError);
   }
 }

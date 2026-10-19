@@ -150,9 +150,6 @@ function parseReply(args: Record<string, unknown> | undefined): BotTurn {
 }
 
 export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKey: string): Promise<BotTurn> {
-  const ai = new GoogleGenAI({ apiKey });
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
   const contents: Content[] = req.history
     .filter((m) => m.type !== "itineraryUpdate" && m.text.trim())
     .slice(-30)
@@ -163,6 +160,25 @@ export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKe
     role: "user",
     parts: [{ text: `[today: ${toISODate(new Date())}]\n[trip state]\n${JSON.stringify(snapshot(tools.trip))}\n\n[user]\n${req.text}` }],
   });
+  const { finish, lastText } = await runToolLoop({
+    apiKey, contents, tools, declarations, finishName: "reply", temperature: 0.7,
+    systemInstruction: systemPrompt(req.profile, req.lang, req.trip.language ?? "en", req.trip.currency || "USD"),
+  });
+  if (finish) return parseReply(finish);
+  return { text: lastText || "Hmm, my compass spun for a second — could you say that again?", quickReplies: [] };
+}
+
+/**
+ * Lets the model call `declarations` (run by ToolExecutor) until it calls `finishName`, whose args are returned.
+ * Without a finishing call, returns the model's last plain text.
+ */
+export async function runToolLoop(opts: {
+  apiKey: string; systemInstruction: string; contents: Content[]; tools: ToolExecutor;
+  declarations: FunctionDeclaration[]; finishName: string; temperature: number;
+}): Promise<{ finish?: Record<string, unknown>; lastText: string }> {
+  const ai = new GoogleGenAI({ apiKey: opts.apiKey });
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const contents = [...opts.contents];
 
   let lastText = "";
   for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -170,10 +186,10 @@ export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKe
       model,
       contents,
       config: {
-        systemInstruction: systemPrompt(req.profile, req.lang, req.trip.language ?? "en", req.trip.currency || "USD"),
-        tools: [{ functionDeclarations: declarations }],
+        systemInstruction: opts.systemInstruction,
+        tools: [{ functionDeclarations: opts.declarations }],
         toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY } },
-        temperature: 0.7,
+        temperature: opts.temperature,
       },
     });
     const calls = res.functionCalls ?? [];
@@ -182,25 +198,25 @@ export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKe
     const modelContent = res.candidates?.[0]?.content;
     if (modelContent) contents.push(modelContent);
 
-    let finalTurn: BotTurn | undefined;
+    let finish: Record<string, unknown> | undefined;
     const parts: Part[] = [];
     for (const call of calls) {
       const name = call.name ?? "";
-      if (name === "reply") {
-        finalTurn = parseReply(call.args);
+      if (name === opts.finishName) {
+        finish = call.args ?? {};
         parts.push({ functionResponse: { id: call.id, name, response: { ok: true } } });
         continue;
       }
       let output: Record<string, unknown>;
       try {
-        output = await tools.execute(name, call.args ?? {});
+        output = await opts.tools.execute(name, call.args ?? {});
       } catch (e) {
         output = { error: e instanceof Error ? e.message : String(e) };
       }
       parts.push({ functionResponse: { id: call.id, name, response: output } });
     }
-    if (finalTurn) return finalTurn;
+    if (finish) return { finish, lastText };
     contents.push({ role: "user", parts });
   }
-  return { text: lastText || "Hmm, my compass spun for a second — could you say that again?", quickReplies: [] };
+  return { lastText };
 }

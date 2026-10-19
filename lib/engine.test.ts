@@ -6,7 +6,8 @@ import { translator } from "./i18n";
 import { convertTripCosts, roundAmount } from "./currency";
 import { ToolExecutor } from "./tools";
 import { mockRespond } from "./engines/mock";
-import { DEFAULT_PROFILE, type Trip } from "./types";
+import { offlineRevise } from "./engines/revise";
+import { DEFAULT_PROFILE, type Trip, type TripComment } from "./types";
 
 const item = (title: string, time: string, id?: string) => ({ id, time, title, lat: 35, lng: 135, category: "sight" });
 
@@ -97,4 +98,17 @@ test("currency conversion re-prices every stop and rounds per currency", () => {
   assert.equal(vnd.currency, "VND");
   assert.equal(vnd.itinerary[0].items[0].estCost, 322_000);
   assert.equal(roundAmount(1234.5, "JPY"), 1230);
+});
+
+test("offline revise applies actionable comments and keeps the trip status", async () => {
+  const { itinerary } = applyOps([{ action: "add", day: 1, item: item("Fushimi Inari", "08:00", "a") }, { action: "add", day: 1, item: item("Gion", "18:00", "b") }], []);
+  const trip: Trip = { id: "t", ownerId: "u", title: "Kyoto", destination: "Kyoto, Japan", status: "dreaming", itinerary, currency: "USD", createdAt: 0, updatedAt: 0 };
+  const comment = (id: string, itemId: string, text: string): TripComment =>
+    ({ id, tripId: "t", itemId, day: 1, itemTitle: "", authorId: "f", authorName: "Friend", text, status: "approved", createdAt: 0 });
+  const tools = new ToolExecutor(trip, "en");
+  const r = await offlineRevise({ trip, lang: "en", comments: [comment("c1", "b", "remove Gion"), comment("c2", "a", "Looks good!")] }, tools);
+  assert.deepEqual(r.appliedIds, ["c1"]);
+  assert.deepEqual(tools.trip.itinerary[0].items.map((i) => i.title), ["Fushimi Inari"]);
+  assert.equal(tools.trip.status, "dreaming");
+  assert.match(r.text, /1 of 2/);
 });

@@ -45,3 +45,6 @@ export function supabaseAdmin() {
   });
   return admin;
 }
+
+/** Escapes LIKE wildcards so an email can be matched case-insensitively with `.ilike()`. */
+export const likeExact = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);

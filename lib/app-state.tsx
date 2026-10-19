@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ChatMessage, ChatResponse, ItineraryOp, Trip, TripStatus, UserProfile } from "./types";
+import type { ChatMessage, ChatResponse, CommentStatus, ItineraryItem, ItineraryOp, ReviseResponse, Trip, TripComment, TripMember, TripStatus, UserProfile } from "./types";
 import { DEFAULT_PROFILE } from "./types";
 import type { TripStore } from "./store/types";
 import { SupabaseStore } from "./store/supabase-store";
@@ -65,11 +65,34 @@ interface AppContextValue {
   setTripCover: (trip: Trip, image: PickedImage | null) => Promise<void>;
   setStopImage: (trip: Trip, itemId: string, image: PickedImage | null) => Promise<void>;
   setAvatar: (file: File) => Promise<void>;
+
+  // ───────────── sharing ─────────────
+  /** The signed-in user owns the trip (members of a shared trip can only read and comment). */
+  isOwner: (trip: Trip) => boolean;
+  /** Owner deletes the trip; a member leaves it. */
+  removeTrip: (trip: Trip) => Promise<void>;
+  subscribeComments: (tripId: string, cb: (c: TripComment[]) => void) => () => void;
+  addComment: (trip: Trip, item: ItineraryItem, day: number, text: string) => Promise<void>;
+  deleteComment: (comment: TripComment) => Promise<void>;
+  reviewComments: (trip: Trip, ids: string[], status: CommentStatus) => Promise<void>;
+  /** Owner: revises the itinerary from approved comments with AI, saves it and marks them applied. */
+  applyComments: (trip: Trip, comments: TripComment[]) => Promise<ReviseResponse>;
+  listMembers: (trip: Trip) => Promise<TripMember[]>;
+  inviteMember: (trip: Trip, email: string) => Promise<{ member: TripMember; existing: boolean }>;
+  removeMember: (member: TripMember) => Promise<void>;
+  /** Owner: the share link, if link sharing is on. */
+  getShareLink: (trip: Trip) => Promise<string | undefined>;
+  /** Owner: turns link sharing on with a new link (old ones stop working) or off. */
+  resetShareLink: (trip: Trip, enabled: boolean) => Promise<string | undefined>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 const SELECTED_KEY = "toucan-trip:selected";
+/** Share links open the app with `?join=<token>`. */
+const JOIN_PARAM = "join";
+
+const shareUrl = (token: string) => `${window.location.origin}/?${JOIN_PARAM}=${encodeURIComponent(token)}`;
 
 export function AppProvider({ userId, children }: { userId: string; children: ReactNode }) {
   const { user, idToken } = useAuth();
@@ -104,6 +127,28 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
   }, [userId]); // `user` only seeds the default name; setLang is stable
 
   const currency = profile.currency ?? DEFAULT_CURRENCY[lang];
+
+  // Share link: join the trip once signed in, open it, and drop the token from the address bar.
+  useEffect(() => {
+    if (!ready) return;
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get(JOIN_PARAM);
+    if (!token) return;
+    url.searchParams.delete(JOIN_PARAM);
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    (async () => {
+      const res = await fetch("/api/trips/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+        body: JSON.stringify({ token }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { tripId?: string; error?: string };
+      if (!res.ok || !data.tripId) throw new Error(data.error || `HTTP ${res.status}`);
+      await storeRef.current?.refreshTrips();
+      setSelectedId(data.tripId);
+      setTab("itinerary");
+    })().catch((e) => alert(t("share.joinFailed", { error: e instanceof Error ? e.message : String(e) })));
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps -- once, after the first trip load
 
   // Keep a valid selection.
   useEffect(() => {
@@ -238,11 +283,84 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     return storeRef.current ? storeRef.current.subscribeMessages(tripId, cb) : () => {};
   }, []);
 
+  // ───────────── sharing ─────────────
+
+  const isOwner = useCallback((trip: Trip) => trip.ownerId === userId, [userId]);
+
+  const removeTrip = useCallback(async (trip: Trip) => {
+    if (trip.ownerId === userId) return deleteTrip(trip.id);
+    const me = (await store().listMembers(trip.id)).find((m) => m.userId === userId);
+    if (me) await store().removeMember(me);
+  }, [userId, deleteTrip]);
+
+  const subscribeComments = useCallback((tripId: string, cb: (c: TripComment[]) => void) => {
+    return storeRef.current ? storeRef.current.subscribeComments(tripId, cb) : () => {};
+  }, []);
+
+  const addComment = useCallback(async (trip: Trip, item: ItineraryItem, day: number, text: string) => {
+    await store().addComment({
+      id: uid(), tripId: trip.id, itemId: item.id, day, itemTitle: item.title, authorId: userId,
+      authorName: profile.name || user?.displayName || user?.email?.split("@")[0] || "", text, status: "open", createdAt: Date.now(),
+    });
+  }, [userId, profile.name, user]);
+
+  const deleteComment = useCallback((comment: TripComment) => store().deleteComment(comment), []);
+
+  const reviewComments = useCallback((trip: Trip, ids: string[], status: CommentStatus) => store().setCommentStatus(trip.id, ids, status), []);
+
+  const applyComments = useCallback(async (trip: Trip, comments: TripComment[]) => {
+    const res = await fetch("/api/trips/revise", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+      body: JSON.stringify({ trip, comments, lang }),
+    });
+    const data = (await res.json()) as ReviseResponse & { error?: string };
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const s = store();
+    await s.saveTrip(data.trip);
+    await s.setCommentStatus(trip.id, data.appliedIds, "applied");
+    // Same trail as chat edits, so the owner's planning chat knows what changed and why.
+    if (data.itineraryChanges.length) await s.addMessage(trip.id, itineraryUpdateMessage(data.itineraryChanges, t));
+    if (data.text) await s.addMessage(trip.id, botMessage(data.text));
+    setEngine(data.engine);
+    return data;
+  }, [idToken, lang, t]);
+
+  const listMembers = useCallback((trip: Trip) => store().listMembers(trip.id), []);
+
+  const inviteMember = useCallback(async (trip: Trip, email: string) => {
+    const res = await fetch("/api/trips/members", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+      body: JSON.stringify({ tripId: trip.id, email }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { member?: Record<string, unknown>; existing?: boolean; error?: string };
+    if (!res.ok || !data.member) throw new Error(data.error || `HTTP ${res.status}`);
+    // The route returns the raw row; re-read so it's mapped like the rest of the list.
+    const member = (await store().listMembers(trip.id)).find((m) => m.id === data.member!.id);
+    if (!member) throw new Error(t("common.somethingWrong"));
+    return { member, existing: !!data.existing };
+  }, [idToken, t]);
+
+  const removeMember = useCallback((member: TripMember) => store().removeMember(member), []);
+
+  const getShareLink = useCallback(async (trip: Trip) => {
+    const token = await store().getShareToken(trip.id);
+    return token && shareUrl(token);
+  }, []);
+
+  const resetShareLink = useCallback(async (trip: Trip, enabled: boolean) => {
+    const token = await store().resetShareToken(trip.id, enabled);
+    return token && shareUrl(token);
+  }, []);
+
   const value = useMemo<AppContextValue>(() => ({
     ready, engine, uid: userId, trips, profile, currency, tab, setTab,
     selectedTrip: trips.find((tr) => tr.id === selectedId),
     selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-  }), [ready, engine, userId, trips, profile, currency, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar]);
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, listMembers, inviteMember, removeMember, getShareLink, resetShareLink,
+  }), [ready, engine, userId, trips, profile, currency, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, listMembers, inviteMember, removeMember, getShareLink, resetShareLink]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

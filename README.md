@@ -33,13 +33,17 @@ Câu lệnh Travel AI offline hiểu được (ngoài các chip):
 app/
   page.tsx               App shell (mobile-first, 5 tab)
   api/chat/route.ts      Một lượt chat: Gemini nếu có key, không thì engine offline (cần Firebase ID token)
-  api/auth/sync/route.ts Gắn claim role cho Supabase + đồng bộ user Firebase → public.profiles
+  api/auth/sync/route.ts Gắn claim role cho Supabase + đồng bộ user Firebase → public.profiles (+ nhận lời mời email đang chờ)
+  api/trips/members      Chủ trip mời người khác bằng email
+  api/trips/join         Mở share link (`/?join=<token>`) → thành member (quyền comment)
+  api/trips/revise       Chủ trip áp dụng các comment đã duyệt vào lịch trình bằng AI
 lib/
   types.ts               Trip, ItineraryDay/Item, ChatMessage, Card, UserProfile, ItineraryOp
   itinerary-engine.ts    add/remove/move/edit thuần + ước tính thời gian di chuyển
   tools.ts               ToolExecutor (updateTripInfo, updateItinerary, search*) + dựng card
   engines/gemini.ts      Function calling + tool `reply` → { text, quickReplies }
   engines/mock.ts        Travel AI offline
+  engines/revise.ts      Sửa lịch trình theo comment đã duyệt (Gemini, hoặc rule-based offline)
   search.ts              searchFlights/Hotels/Places (MOCK) + geocode (Open-Meteo, không cần key)
   mock-data.ts           Dữ liệu thành phố cho Travel AI offline
   auth.tsx               AuthProvider (Firebase Auth) + sync sang Supabase
@@ -57,6 +61,7 @@ Những quyết định chính:
 - **Mỗi lần itinerary đổi, bot post card `itineraryUpdate`**, kể cả khi kéo-thả/xoá ở tab Itinerary. Card được post *trước* câu trả lời, nên chip luôn nằm dưới tin nhắn bot mới nhất.
 - **Giá không bao giờ do model tự viết.** Card vé/khách sạn/quán được dựng từ kết quả tool; model kết thúc mỗi lượt bằng tool `reply(text, quickReplies)`.
 - **Khác spec:** spec ghi "Gemini qua Firebase AI Logic". Trên web + Vercel, gọi Gemini từ API route với key nằm trong env server vẫn giữ đúng nguyên tắc "không ship key", lại không bắt buộc phải có Firebase mới chạy được. Nếu muốn đúng Firebase AI Logic thì có thể đổi sang `firebase/ai` phía client (cần bật App Check).
+- **Chia sẻ & góp ý** (migration `20261022000000_sharing.sql`): chủ trip mời bằng email hoặc bật share link; member chỉ đọc trip và comment vào từng điểm dừng (`trip_comments`), không thấy chat lập kế hoạch. Chủ trip duyệt (approve/reject) rồi bấm "Cập nhật lịch trình bằng AI": `/api/trips/revise` chạy tool `updateItinerary` trên bản sao, client lưu trip, đánh dấu comment `applied` và post card `itineraryUpdate` vào chat. RLS dùng hàm `is_trip_owner` / `is_trip_member` (SECURITY DEFINER, tránh đệ quy policy). Tạo member chỉ qua API (service role). Lời mời email cho người chưa có tài khoản chỉ được nhận khi email đã xác minh (Google sign-in); chưa có dịch vụ gửi mail nên app mở `mailto:` để chủ trip tự báo.
 - Kéo-thả trong một ngày giữ nguyên các khung giờ: item đổi chỗ sẽ nhận khung giờ theo vị trí mới.
 - Ảnh (cover trip, ảnh điểm dừng, avatar): tạm thời lưu trên **Vercel Blob** (store public, `BLOB_READ_WRITE_TOKEN`). Người dùng tải ảnh lên (trình duyệt → Blob trực tiếp, `/api/images/upload` chỉ ký token sau khi xác thực Firebase và giới hạn trong thư mục `{uid}/`) hoặc tạo ảnh bằng Gemini (`/api/images/generate`, model `GEMINI_IMAGE_MODEL`, có preview trước khi dùng, ảnh AI được ghi nhãn). `NEXT_PUBLIC_IMAGE_STORAGE=supabase` để quay lại Supabase Storage.
 - Ảnh địa điểm lấy từ Wikipedia/Wikimedia Commons (không cần key): `/api/chat` tìm bài viết gần toạ độ mỗi điểm dừng có tên khớp, lưu `imageUrl` + `imageCredit` (tác giả, giấy phép — bắt buộc hiển thị). Điểm chung chung ("Local Breakfast Café") không có ảnh → gradient. Đặt `WIKIMEDIA_CONTACT` (email hoặc URL) để được 200 request/phút thay vì 10.

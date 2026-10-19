@@ -65,6 +65,40 @@ export interface Trip {
   updatedAt: number;
 }
 
+// ───────────── Sharing ─────────────
+
+/** The owner edits the trip; members invited by email or share link can read it and comment on stops. */
+export type TripRole = "owner" | "commenter";
+
+export interface TripMember {
+  id: string;
+  tripId: string;
+  /** Unset for an email invite whose person hasn't signed up yet. */
+  userId?: string;
+  email?: string;
+  displayName?: string;
+  role: Exclude<TripRole, "owner">;
+  createdAt: number;
+}
+
+/** open → approved | rejected by the owner → applied once AI merged it into the itinerary. */
+export type CommentStatus = "open" | "approved" | "rejected" | "applied";
+
+export interface TripComment {
+  id: string;
+  tripId: string;
+  /** ItineraryItem.id; `day` and `itemTitle` are snapshots so the comment reads well after the stop changes. */
+  itemId: string;
+  day?: number;
+  itemTitle: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  status: CommentStatus;
+  createdAt: number;
+  resolvedAt?: number;
+}
+
 export type MessageRole = "user" | "bot";
 /** `summary` replaces older messages after compaction. */
 export type MessageType = "text" | "quickReplies" | "flightCard" | "hotelCard" | "placeCard" | "itineraryUpdate" | "summary";
@@ -206,4 +240,21 @@ export interface ConvertRequest {
   trip: Trip;
   language: Lang;
   currency: string;
+}
+
+/** /api/trips/revise contract: the owner applies approved comments with AI. */
+export interface ReviseRequest {
+  trip: Trip;
+  comments: TripComment[];
+  lang: Lang;
+}
+
+export interface ReviseResponse {
+  /** Short summary for the owner (also posted to chat). */
+  text: string;
+  trip: Trip;
+  itineraryChanges: string[];
+  /** Comments the planner could act on; the rest stay approved. */
+  appliedIds: string[];
+  engine: "gemini" | "offline";
 }

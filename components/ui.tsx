@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { Compass, Mountain } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Compass, Mountain, X } from "lucide-react";
 import type { TripStatus } from "@/lib/types";
 import { cn } from "@/lib/util";
 import { useI18n } from "@/lib/i18n-react";
@@ -86,14 +87,50 @@ export function IconButton({ className, ...props }: ButtonHTMLAttributes<HTMLBut
   );
 }
 
-export function NoTrip({ title, message, onStart }: { title: string; message: string; onStart: () => void }) {
+export function NoTrip({ title, message, action, onStart }: { title: string; message: string; action?: string; onStart: () => void }) {
   const { t } = useI18n();
   return (
     <div className="flex min-h-[80dvh] flex-col items-center justify-center gap-4 px-8 text-center">
       <img src="/mascot.webp" alt="" className="w-40" />
       <h2 className="text-2xl font-bold">{title}</h2>
       <p className="text-ink-2">{message}</p>
-      <PrimaryButton className="mt-2 max-w-xs" onClick={onStart}><Compass className="h-5 w-5" /> {t("common.startNextTrip")}</PrimaryButton>
+      <PrimaryButton className="mt-2 max-w-xs" onClick={onStart}><Compass className="h-5 w-5" /> {action ?? t("common.startNextTrip")}</PrimaryButton>
     </div>
   );
+}
+
+/** Bottom sheet with a title and close button. Portal + z above the TabBar (z-[1000]), like ImagePicker. */
+export function Sheet({ title, subtitle, onClose, locked, footer, children }: {
+  title: string;
+  subtitle?: ReactNode;
+  onClose: () => void;
+  /** Ignore backdrop taps / disable close, e.g. while saving. */
+  locked?: boolean;
+  /** Pinned under the scrolling content (e.g. a comment box or the main action). */
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  const { t } = useI18n();
+  return createPortal(
+    <div className="fixed inset-0 z-[1100] flex items-end justify-center bg-black/40" onClick={() => !locked && onClose()}>
+      <div role="dialog" aria-modal aria-label={title} onClick={(e) => e.stopPropagation()}
+        className="rise flex max-h-[90dvh] w-full max-w-[480px] flex-col rounded-t-[28px] bg-white">
+        <div className="flex items-start gap-2 px-5 pt-4 pb-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-lg font-bold">{title}</h2>
+            {subtitle && <div className="mt-0.5 text-[13px] text-ink-2">{subtitle}</div>}
+          </div>
+          <button aria-label={t("common.close")} onClick={onClose} disabled={locked} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface disabled:opacity-60"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 pb-4">{children}</div>
+        {footer && <div className="border-t border-line/70 px-5 pt-3 pb-[max(16px,env(safe-area-inset-bottom))]">{footer}</div>}
+        {!footer && <div className="pb-[max(8px,env(safe-area-inset-bottom))]" />}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+export function ErrorNote({ children }: { children: ReactNode }) {
+  return <p role="alert" className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{children}</p>;
 }

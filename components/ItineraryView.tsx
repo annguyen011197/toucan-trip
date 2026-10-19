@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Camera, Check, Footprints, Languages, ImagePlus, GripVertical, Lightbulb, Map as MapIcon, MapPin, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, WandSparkles, X } from "lucide-react";
+import { ArrowLeft, Camera, Check, ChevronRight, Footprints, Languages, ImagePlus, GripVertical, Lightbulb, Map as MapIcon, MapPin, MessageCircle, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, UserPlus, Users, WandSparkles, X } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useApp } from "@/lib/app-state";
-import { TRIP_STATUSES, type ItineraryItem, type Trip } from "@/lib/types";
+import { TRIP_STATUSES, type ItineraryItem, type Trip, type TripComment } from "@/lib/types";
 import { dayCost, googleMapsUrl, travelLeg } from "@/lib/itinerary-engine";
 import { findCity } from "@/lib/mock-data";
 import { displayTime, formatDateRange, formatLongDate } from "@/lib/time";
@@ -18,6 +18,8 @@ import { PrimaryButton, RemoteImage } from "./ui";
 import { shareTrip } from "./ChatView";
 import { ImagePicker } from "./ImagePicker";
 import { ConvertDialog, conversionFor, type Conversion } from "./ConvertDialog";
+import { ShareSheet } from "./ShareSheet";
+import { ReviewSheet, StopComments, useTripComments } from "./Comments";
 
 const DISMISSED_KEY = "toucan-trip:convert-dismissed";
 
@@ -29,16 +31,22 @@ function readDismissed(): string[] {
 const TripMap = dynamic(() => import("./TripMap"), { ssr: false, loading: () => <div className="h-full w-full animate-pulse bg-surface" /> });
 
 export function ItineraryView({ trip }: { trip: Trip }) {
-  const { setTab, applyItinerary, setStatus, setTripCover, setStopImage, currency, convertTrip } = useApp();
+  const { setTab, applyItinerary, setStatus, setTripCover, setStopImage, currency, convertTrip, isOwner } = useApp();
   const { t, lang } = useI18n();
+  // Members of a shared trip only read and comment; every edit control is the owner's.
+  const owner = isOwner(trip);
+  const comments = useTripComments(trip.id);
   const [picker, setPicker] = useState<{ kind: "cover" } | { kind: "stop"; item: ItineraryItem }>();
+  const [sheet, setSheet] = useState<{ kind: "share" } | { kind: "review" } | { kind: "comments"; item: ItineraryItem; day: number }>();
+  const toReview = comments.filter((c) => c.status === "open").length;
+  const approved = comments.filter((c) => c.status === "approved").length;
   const [selectedDay, setSelectedDay] = useState(1);
   const [menu, setMenu] = useState(false);
   const day = trip.itinerary.find((d) => d.day === selectedDay);
   const city = findCity(trip.destination);
 
   // Offer to convert a plan made in another language/currency: a popup once, then a button under the hero.
-  const conversion = trip.itinerary.length ? conversionFor(trip, lang, currency) : undefined;
+  const conversion = owner && trip.itinerary.length ? conversionFor(trip, lang, currency) : undefined;
   const [dismissed, setDismissed] = useState(readDismissed);
   // The offer being shown. Held apart from `conversion`: saving updates the trip optimistically, which clears
   // `conversion` mid-save, and a failed save must keep the dialog (and its error) open.
@@ -79,9 +87,9 @@ export function ItineraryView({ trip }: { trip: Trip }) {
         <button aria-label={t("common.back")} onClick={() => setTab("home")} className="flex h-10 w-10 items-center justify-center"><ArrowLeft className="h-5 w-5" /></button>
         <div className="flex-1 text-center">
           <div className="text-[17px] font-bold">{trip.title}</div>
-          <div className="text-[11px] font-semibold tracking-[0.15em] text-primary">{t("itin.aiGenerated")}</div>
+          <div className="text-[11px] font-semibold tracking-[0.15em] text-primary">{t(owner ? "itin.aiGenerated" : "itin.sharedWithYou")}</div>
         </div>
-        <div className="relative">
+        {!owner ? <div className="w-10" /> : <div className="relative">
           <button aria-label={t("itin.tripStatus")} onClick={() => setMenu((m) => !m)} className="flex h-10 w-10 items-center justify-center"><MoreVertical className="h-5 w-5" /></button>
           {menu && (
             <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-2xl bg-white py-1 shadow-card ring-1 ring-line/60">
@@ -94,7 +102,7 @@ export function ItineraryView({ trip }: { trip: Trip }) {
               ))}
             </div>
           )}
-        </div>
+        </div>}
       </header>
 
       <div className="space-y-5 pt-4" onClick={() => menu && setMenu(false)}>
@@ -102,20 +110,42 @@ export function ItineraryView({ trip }: { trip: Trip }) {
         <div className="relative mx-5 h-[180px] overflow-hidden rounded-card shadow-[0_6px_16px_rgb(0_0_0/0.12)]">
           <RemoteImage src={trip.coverImageUrl} seed={trip.id} className="absolute inset-0" />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent from-30% to-black/60" />
-          <button aria-label={t("itin.changeCover")} onClick={() => setPicker({ kind: "cover" })}
-            className="absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-ink-2 backdrop-blur">
-            <Camera className="h-4 w-4" />
-          </button>
+          {owner && (
+            <button aria-label={t("itin.changeCover")} onClick={() => setPicker({ kind: "cover" })}
+              className="absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-ink-2 backdrop-blur">
+              <Camera className="h-4 w-4" />
+            </button>
+          )}
           <div className="absolute bottom-4 left-5 text-white">
             <div className="text-2xl font-bold">{trip.destination ?? t("common.destinationTbd")}</div>
             <div className="text-sm opacity-90">{formatDateRange(trip.startDate, trip.endDate, lang).replace(" - ", " — ")}</div>
           </div>
         </div>
 
-        <div className="mx-5 flex gap-3">
-          <PrimaryButton color="primary" onClick={() => setTab("chat")}><WandSparkles className="h-5 w-5" /> {t("itin.continue")}</PrimaryButton>
-          <button aria-label={t("common.share")} onClick={() => shareTrip(trip, lang)} className="flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary"><Share2 className="h-5 w-5" /></button>
-        </div>
+        {owner ? (
+          <div className="mx-5 flex gap-3">
+            <PrimaryButton color="primary" onClick={() => setTab("chat")}><WandSparkles className="h-5 w-5" /> {t("itin.continue")}</PrimaryButton>
+            <button aria-label={t("share.title")} onClick={() => setSheet({ kind: "share" })} className="flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary"><UserPlus className="h-5 w-5" /></button>
+          </div>
+        ) : (
+          <div className="mx-5 flex items-center gap-3 rounded-card bg-primary-soft/60 p-4">
+            <Users className="h-5 w-5 shrink-0 text-primary" />
+            <p className="flex-1 text-sm text-ink-2">{t("itin.commenterHint")}</p>
+            <button aria-label={t("common.share")} onClick={() => shareTrip(trip, lang)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-primary"><Share2 className="h-4 w-4" /></button>
+          </div>
+        )}
+
+        {owner && (toReview > 0 || approved > 0) && (
+          <button onClick={() => setSheet({ kind: "review" })}
+            className="mx-5 flex w-[calc(100%-40px)] items-center gap-3 rounded-card border border-amber-200 bg-amber-50 p-4 text-left">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-amber-700"><MessageCircle className="h-5 w-5" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">{toReview ? t("itin.reviewCount", { n: toReview }) : t("itin.approvedCount", { n: approved })}</span>
+              <span className="block text-xs text-ink-2">{toReview ? t("itin.reviewHint") : t("itin.applyHint")}</span>
+            </span>
+            <ChevronRight className="h-5 w-5 text-muted" />
+          </button>
+        )}
 
         {conversion && !offer && (
           <button onClick={() => setOffer(conversion)}
@@ -150,7 +180,7 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                 <button onClick={() => setTab("map")} className="flex items-center gap-1.5 text-sm font-semibold text-primary"><MapIcon className="h-4 w-4" fill="currentColor" fillOpacity={0.2} /> {t("itin.viewRoute")}</button>
               </div>
               {day?.date && <div className="mt-1 text-[13px] text-ink-2">{formatLongDate(day.date, lang)}</div>}
-              <div className="mt-0.5 text-xs text-muted">{t("itin.dragHint")}</div>
+              <div className="mt-0.5 text-xs text-muted">{t(owner ? "itin.dragHint" : "itin.commentHint")}</div>
             </div>
 
             {/* Timeline */}
@@ -160,8 +190,9 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                   <SortableContext items={day.items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
                     {day.items.map((item, idx) => (
                       <TimelineRow key={item.id} item={item} first={idx === 0} last={idx === day.items.length - 1}
-                        next={day.items[idx + 1]} destination={trip.destination} currency={trip.currency} onRemove={() => remove(item)}
-                        onImage={() => setPicker({ kind: "stop", item })} />
+                        next={day.items[idx + 1]} destination={trip.destination} currency={trip.currency} editable={owner}
+                        comments={comments.filter((c) => c.itemId === item.id)} onRemove={() => remove(item)}
+                        onImage={() => setPicker({ kind: "stop", item })} onComments={() => setSheet({ kind: "comments", item, day: day.day })} />
                     ))}
                   </SortableContext>
                 </DndContext>
@@ -207,6 +238,11 @@ export function ItineraryView({ trip }: { trip: Trip }) {
         )}
       </div>
 
+      {sheet?.kind === "share" && <ShareSheet trip={trip} onClose={() => setSheet(undefined)} />}
+      {sheet?.kind === "review" && <ReviewSheet trip={trip} comments={comments} onClose={() => setSheet(undefined)} />}
+      {sheet?.kind === "comments" && (
+        <StopComments trip={trip} item={sheet.item} day={sheet.day} comments={comments} onClose={() => setSheet(undefined)} />
+      )}
       {offer && (
         <ConvertDialog trip={trip} conversion={offer} onClose={closeConvert}
           onConvert={async () => { await convertTrip(trip); setOffer(undefined); }} />
@@ -224,11 +260,16 @@ export function ItineraryView({ trip }: { trip: Trip }) {
   );
 }
 
-function TimelineRow({ item, first, last, next, destination, currency, onRemove, onImage }: {
-  item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; destination?: string; currency: string; onRemove: () => void; onImage: () => void;
+function TimelineRow({ item, first, last, next, destination, currency, editable, comments, onRemove, onImage, onComments }: {
+  item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; destination?: string; currency: string;
+  /** Owner: drag, photo and remove controls. */
+  editable: boolean;
+  comments: TripComment[];
+  onRemove: () => void; onImage: () => void; onComments: () => void;
 }) {
   const { t, lang } = useI18n();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: !editable });
+  const unresolved = comments.filter((c) => c.status === "open" || c.status === "approved").length;
   const leg = next ? travelLeg(item, next) : undefined;
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}
@@ -241,17 +282,26 @@ function TimelineRow({ item, first, last, next, destination, currency, onRemove,
       <div className={cn("min-w-0 flex-1", last ? "pb-4" : "pb-6")} {...attributes} {...listeners} style={{ touchAction: "manipulation" }}>
         <div className="flex items-center gap-2">
           <span className={cn("text-xs font-semibold", first ? "text-primary" : "text-muted")}>{displayTime(item.time, lang)}</span>
-          <GripVertical className="h-3.5 w-3.5 text-muted/60" />
+          {editable && <GripVertical className="h-3.5 w-3.5 text-muted/60" />}
           <span className="flex-1" />
           {item.estCost > 0 && <span className="text-xs font-medium text-ink-2">{money(item.estCost, currency, lang)}</span>}
-          <button aria-label={t("itin.photoFor", { title: item.title })} onPointerDown={(e) => e.stopPropagation()} onClick={onImage}
-            className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
-            <ImagePlus className="h-3.5 w-3.5" />
+          <button aria-label={t("itin.commentsFor", { title: item.title, n: comments.length })} onPointerDown={(e) => e.stopPropagation()} onClick={onComments}
+            className={cn("flex h-6 min-w-6 items-center justify-center gap-0.5 rounded-full px-1 text-[11px] font-bold",
+              unresolved ? "bg-amber-100 text-amber-800" : "text-muted hover:bg-surface hover:text-ink")}>
+            <MessageCircle className="h-3.5 w-3.5" />{comments.length > 0 && comments.length}
           </button>
-          <button aria-label={t("itin.remove", { title: item.title })} onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
-            className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
-            <X className="h-3.5 w-3.5" />
-          </button>
+          {editable && (
+            <>
+              <button aria-label={t("itin.photoFor", { title: item.title })} onPointerDown={(e) => e.stopPropagation()} onClick={onImage}
+                className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
+                <ImagePlus className="h-3.5 w-3.5" />
+              </button>
+              <button aria-label={t("itin.remove", { title: item.title })} onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
+                className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
         </div>
         <div className="mt-1 text-base font-semibold">{item.title}</div>
         <a href={googleMapsUrl(item, destination)} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => e.stopPropagation()}
