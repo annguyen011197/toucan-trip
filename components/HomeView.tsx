@@ -3,21 +3,20 @@
 import { useState } from "react";
 import { ArrowRight, Bell, CalendarDays, Compass, Loader2, MoreHorizontal, Sparkles, Trash2 } from "lucide-react";
 import { useApp } from "@/lib/app-state";
-import { HAND_PICKED } from "@/lib/mock-data";
 import { formatDateRange } from "@/lib/time";
-import type { Destination, Trip } from "@/lib/types";
-import { IconButton, PrimaryButton, RemoteImage, StatusBadge, TagPill } from "./ui";
+import type { Trip } from "@/lib/types";
+import { IconButton, PrimaryButton, RemoteImage, StatusBadge } from "./ui";
 import { cn } from "@/lib/util";
 
 export function HomeView() {
-  const { trips, startNewTrip, selectTrip, selectedTrip, engine, storeKind, deleteTrip, setTab } = useApp();
+  const { trips, startNewTrip, selectTrip, selectedTrip, engine, deleteTrip, setTab } = useApp();
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(false);
 
-  const start = async (d?: Destination) => {
+  const start = async () => {
     if (creating) return;
     setCreating(true);
-    try { await startNewTrip(d); } finally { setCreating(false); }
+    try { await startNewTrip(); } finally { setCreating(false); }
   };
 
   return (
@@ -25,7 +24,7 @@ export function HomeView() {
       {/* Top bar */}
       <div className="flex items-center gap-2.5 px-5 pt-[max(12px,env(safe-area-inset-top))]">
         <span className="rounded-full bg-white px-2.5 py-1.5 text-[10px] font-bold tracking-widest text-ink-2 uppercase">
-          {engine === "gemini" ? "Gemini" : "Offline AI"} · {storeKind === "firebase" ? "Firestore" : "This device"}
+          {engine === "gemini" ? "Gemini" : "Offline AI"}
         </span>
         <div className="flex-1" />
         <IconButton aria-label="Plan with AI" onClick={() => start()}><Sparkles className="h-5 w-5 text-primary" /></IconButton>
@@ -52,27 +51,6 @@ export function HomeView() {
         <PrimaryButton className="mt-5" onClick={() => start()} disabled={creating}>
           {creating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Compass className="h-5 w-5" />} Start your next trip
         </PrimaryButton>
-      </section>
-
-      {/* Hand-picked */}
-      <section>
-        <div className="flex items-baseline justify-between px-5">
-          <h2 className="text-[22px] font-bold">Hand-picked for you</h2>
-          <span className="text-sm font-semibold text-cta">View collection</span>
-        </div>
-        <div className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto px-5 py-4">
-          {HAND_PICKED.map((d) => (
-            <button key={d.id} onClick={() => start(d)} aria-label={`Start a trip to ${d.destination}`}
-              className="relative h-[280px] w-[220px] shrink-0 snap-start overflow-hidden rounded-[32px] text-left shadow-[0_10px_24px_rgb(0_0_0/0.15)] transition active:scale-[0.98]">
-              <RemoteImage src={d.imageUrl} seed={d.id} className="absolute inset-0" />
-              <div className="absolute inset-0 bg-gradient-to-b from-transparent from-40% to-black/60" />
-              <div className="absolute bottom-5 left-5 space-y-2">
-                <TagPill>{d.tag}</TagPill>
-                <div className="text-[22px] font-bold text-white">{d.title}</div>
-              </div>
-            </button>
-          ))}
-        </div>
       </section>
 
       {/* My itinerary */}

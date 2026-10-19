@@ -17,15 +17,21 @@ const PALETTES = [
   ["#1A7FE8", "#6FC3FF"], ["#0B5CAD", "#2BB3A3"], ["#CE6000", "#FFB36B"], ["#3D4E81", "#8E9EEA"],
 ];
 
-/** Remote photo with a graceful gradient fallback (Stitch image URLs may expire). */
+/** Remote photo with a graceful gradient fallback for missing or broken URLs. */
 export function RemoteImage({ src, seed = "", alt = "", className }: { src?: string; seed?: string; alt?: string; className?: string }) {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  // Tracked per URL, so a new src after a failed/loaded one is shown (e.g. a replaced trip cover).
+  const [failedSrc, setFailedSrc] = useState<string>();
+  const [loadedSrc, setLoadedSrc] = useState<string>();
+  const failed = failedSrc === src;
+  const loaded = loadedSrc === src;
   const [a, b] = PALETTES[[...seed].reduce((s, c) => s + c.charCodeAt(0), 0) % PALETTES.length];
+  // Only default to `relative`: combined with a caller's `absolute inset-0`, Tailwind's CSS order makes
+  // `relative` win, the box collapses to 0px and the image disappears.
+  const positioned = /\b(absolute|fixed|sticky)\b/.test(className ?? "");
   return (
-    <div className={cn("relative overflow-hidden", className)} style={{ background: `linear-gradient(135deg, ${a}, ${b})` }}>
+    <div className={cn(!positioned && "relative", "overflow-hidden", className)} style={{ background: `linear-gradient(135deg, ${a}, ${b})` }}>
       {!failed && src ? (
-        <img src={src} alt={alt} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} onLoad={() => setLoaded(true)}
+        <img src={src} alt={alt} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} onLoad={() => setLoadedSrc(src)}
           className={cn("absolute inset-0 h-full w-full object-cover transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")} />
       ) : (
         <Mountain className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 text-white/40" />

@@ -3,6 +3,8 @@ import type { ChatRequest, ChatResponse } from "@/lib/types";
 import { ToolExecutor } from "@/lib/tools";
 import { mockRespond } from "@/lib/engines/mock";
 import { geminiRespond } from "@/lib/engines/gemini";
+import { AuthError, verifyRequest } from "@/lib/server/auth";
+import { addPlaceImages } from "@/lib/server/place-images";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -10,9 +12,16 @@ export const maxDuration = 60;
 /**
  * One bot turn. Stateless: the client sends the trip + recent history, we run the engine
  * (Gemini if GEMINI_API_KEY is set, otherwise the offline Travel AI) and return the updated trip.
+ * Requires a Firebase ID token so only signed-in users can spend model quota.
  * The client persists it — the itinerary stays the single source of truth in the store.
  */
 export async function POST(request: Request) {
+  try {
+    await verifyRequest(request);
+  } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: "Please sign in again" }, { status: 401 });
+    throw e;
+  }
   let body: ChatRequest;
   try {
     body = (await request.json()) as ChatRequest;
@@ -33,7 +42,7 @@ export async function POST(request: Request) {
       text: turn.text,
       quickReplies: turn.quickReplies,
       cards: tools.cards,
-      trip: tools.trip,
+      trip: await addPlaceImages(tools.trip),
       itineraryChanges: tools.itineraryChanges,
       engine: apiKey ? "gemini" : "offline",
     };

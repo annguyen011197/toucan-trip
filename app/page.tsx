@@ -1,23 +1,27 @@
 "use client";
 
 import { AppProvider, useApp } from "@/lib/app-state";
+import { AuthProvider, useAuth } from "@/lib/auth";
 import { TabBar } from "@/components/TabBar";
 import { HomeView } from "@/components/HomeView";
 import { ChatView } from "@/components/ChatView";
 import { ItineraryView } from "@/components/ItineraryView";
 import { MapScreen } from "@/components/MapScreen";
 import { ProfileView } from "@/components/ProfileView";
+import { SignInView } from "@/components/SignInView";
 import { NoTrip } from "@/components/ui";
+
+function Splash() {
+  return (
+    <div className="flex min-h-dvh items-center justify-center">
+      <img src="/mascot.webp" alt="" className="h-28 w-28 animate-pulse" />
+    </div>
+  );
+}
 
 function Screen() {
   const { ready, tab, selectedTrip, startNewTrip, setTab } = useApp();
-  if (!ready) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center">
-        <img src="/mascot.webp" alt="" className="h-28 w-28 animate-pulse" />
-      </div>
-    );
-  }
+  if (!ready) return <Splash />;
   switch (tab) {
     case "home":
       return <HomeView />;
@@ -36,9 +40,12 @@ function Screen() {
   }
 }
 
-export default function Page() {
+function Gate() {
+  const { status, user } = useAuth();
+  if (status === "loading") return <Splash />;
+  if (status !== "signedIn" || !user) return <SignInView />;
   return (
-    <AppProvider>
+    <AppProvider key={user.uid} userId={user.uid}>
       <div className="relative mx-auto min-h-dvh max-w-[480px] bg-bg shadow-[0_0_60px_rgb(15_40_80/0.08)]">
         <main className="pb-[calc(76px+env(safe-area-inset-bottom))]">
           <Screen />
@@ -46,5 +53,13 @@ export default function Page() {
         <TabBar />
       </div>
     </AppProvider>
+  );
+}
+
+export default function Page() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   );
 }

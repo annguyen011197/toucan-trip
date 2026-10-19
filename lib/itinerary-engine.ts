@@ -58,6 +58,7 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
     time: normalizeTime(p.time) ?? "12:00",
     title,
     placeId: p.placeId,
+    address: p.address,
     lat: p.lat ?? 0,
     lng: p.lng ?? 0,
     note: p.note ?? "",
@@ -90,17 +91,24 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
         if (!loc || !op.item) { failures.push(`Couldn't find ${op.item?.title ?? op.itemId ?? "item"} to edit`); break; }
         const [item] = loc.d.items.splice(loc.idx, 1);
         const oldTime = item.time;
+        const before = { title: item.title, lat: item.lat, lng: item.lng };
         const p = op.item;
         const t = normalizeTime(p.time);
         if (t) item.time = t;
         if (op.itemId && p.title) item.title = p.title; // title is the locator unless targeting by id
         if (p.placeId !== undefined) item.placeId = p.placeId;
+        if (p.address !== undefined) item.address = p.address;
         if (p.lat !== undefined) item.lat = p.lat;
         if (p.lng !== undefined) item.lng = p.lng;
         if (p.note !== undefined) item.note = p.note;
         if (p.category !== undefined) item.category = lenientCategory(p.category);
         if (p.estCost !== undefined) item.estCost = p.estCost;
         if (p.imageUrl !== undefined) item.imageUrl = p.imageUrl;
+        // A Wikipedia photo belonged to the old place: look again. (User uploads / AI images are kept.)
+        if (item.imageCredit?.url?.includes("wikimedia.org") && p.imageUrl === undefined
+          && (item.title !== before.title || item.lat !== before.lat || item.lng !== before.lng)) {
+          item.imageUrl = item.imageCredit = item.imageSearched = undefined;
+        }
         if (p.tags !== undefined) item.tags = p.tags;
         insertSorted(item, loc.d.day);
         changes.push(`${item.title} ${item.time !== oldTime ? `moved to ${displayTime(item.time)}` : "updated"} · Day ${loc.d.day}`);
@@ -144,6 +152,13 @@ export function distanceMeters(a: { lat: number; lng: number }, b: { lat: number
 }
 
 export const hasLocation = (i: { lat: number; lng: number }) => !(i.lat === 0 && i.lng === 0);
+
+/** Google Maps search link (no API key). Name + address/destination opens the place page; bare coordinates are the fallback. */
+export function googleMapsUrl(item: Pick<ItineraryItem, "title" | "address" | "lat" | "lng">, destination?: string): string {
+  const where = item.address ?? destination;
+  const query = where ? `${item.title}, ${where}` : hasLocation(item) ? `${item.lat},${item.lng}` : item.title;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
 
 export function travelLeg(a: ItineraryItem, b: ItineraryItem): { minutes: number; mode: "walk" | "transit" } | undefined {
   if (!hasLocation(a) || !hasLocation(b)) return undefined;

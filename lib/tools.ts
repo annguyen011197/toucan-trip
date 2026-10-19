@@ -12,7 +12,6 @@ export function applyTripInfo(trip: Trip, patch: TripInfoPatch): Trip {
     const city = findCity(patch.destination);
     t.destination = city?.name ?? patch.destination.trim();
     if (!t.title || t.title === "New Trip") t.title = `${t.destination.split(",")[0]} Adventure`;
-    if (!t.coverImageUrl) t.coverImageUrl = city?.cover;
   }
   if (patch.title?.trim()) t.title = patch.title.trim();
   if (patch.origin?.trim()) t.origin = patch.origin.trim();

@@ -10,12 +10,18 @@ export interface ItineraryItem {
   time: string;
   title: string;
   placeId?: string;
+  /** Street address or neighborhood, when known. */
+  address?: string;
   lat: number;
   lng: number;
   note: string;
   category: ItemCategory;
   estCost: number;
   imageUrl?: string;
+  /** Attribution for `imageUrl` (required for Wikimedia Commons photos; marks AI-generated ones). */
+  imageCredit?: { text: string; url?: string };
+  /** A photo lookup already ran for this stop (hit or miss), so it isn't repeated. */
+  imageSearched?: boolean;
   tags?: string[];
 }
 
@@ -55,7 +61,8 @@ export interface Trip {
 }
 
 export type MessageRole = "user" | "bot";
-export type MessageType = "text" | "quickReplies" | "flightCard" | "hotelCard" | "placeCard" | "itineraryUpdate";
+/** `summary` replaces older messages after compaction. */
+export type MessageType = "text" | "quickReplies" | "flightCard" | "hotelCard" | "placeCard" | "itineraryUpdate" | "summary";
 export type CardKind = "flight" | "hotel" | "place" | "itineraryUpdate";
 
 export interface Card {
@@ -97,28 +104,21 @@ export interface UserProfile {
   pace: Pace;
   diet: string;
   homeAirport: string;
+  /** Supabase Storage URL */
+  avatarUrl?: string;
 }
 
 export const DEFAULT_PROFILE: UserProfile = {
-  name: "Traveler",
+  name: "",
   interests: ["Food", "Culture"],
   budgetLevel: "midRange",
   pace: "relaxed",
   diet: "No restrictions",
-  homeAirport: "SGN",
+  homeAirport: "",
 };
 
 export const ALL_INTERESTS = ["Food", "Culture", "Nature", "Adventure", "Temples & History", "Nightlife", "Shopping", "Beaches", "Art & Museums", "Photography"];
 export const DIET_OPTIONS = ["No restrictions", "Vegetarian", "Vegan", "Halal", "Kosher", "Gluten-free"];
-
-export interface Destination {
-  id: string;
-  title: string;
-  tag: string;
-  imageUrl?: string;
-  destination: string;
-  blurb: string;
-}
 
 /** Partial item used by add/edit ops. */
 export interface ItineraryItemPatch {
@@ -126,6 +126,7 @@ export interface ItineraryItemPatch {
   time?: string;
   title?: string;
   placeId?: string;
+  address?: string;
   lat?: number;
   lng?: number;
   note?: string;

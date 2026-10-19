@@ -9,6 +9,18 @@ import { hasLocation } from "@/lib/itinerary-engine";
 
 const PRIMARY = "#1a7fe8";
 
+/** CARTO Voyager needs a (free) key since Sep 2026 — without one it serves "API KEY REQUIRED" tiles. Fall back to OSM. */
+const CARTO_KEY = process.env.NEXT_PUBLIC_CARTO_API_KEY;
+const TILES = CARTO_KEY
+  ? {
+      url: `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+    }
+  : {
+      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    };
+
 function stopIcon(n: number, focused: boolean) {
   const size = focused ? 38 : 32;
   return L.divIcon({
@@ -56,10 +68,7 @@ export default function TripMap({ trip, day, interactive = true, focusedId, onSe
   return (
     <MapContainer center={center} zoom={13} className="h-full w-full" zoomControl={false} dragging={interactive}
       scrollWheelZoom={interactive} doubleClickZoom={interactive} touchZoom={interactive} keyboard={interactive} attributionControl={interactive}>
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-      />
+      <TileLayer attribution={TILES.attribution} url={TILES.url} maxZoom={19} />
       <FitBounds points={points} focus={focused ? [focused.lat, focused.lng] : undefined} />
       {points.length > 1 && (
         <>

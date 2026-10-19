@@ -1,15 +1,26 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ChatMessage, ChatResponse, Destination, ItineraryOp, Trip, TripStatus, UserProfile } from "./types";
+import type { ChatMessage, ChatResponse, ItineraryOp, Trip, TripStatus, UserProfile } from "./types";
 import { DEFAULT_PROFILE } from "./types";
-import { createStore, type TripStore } from "./store";
-import { findCity } from "./mock-data";
+import type { TripStore } from "./store/types";
+import { SupabaseStore } from "./store/supabase-store";
+import { useAuth } from "./auth";
+import { removeImage, uploadImage } from "./storage";
+import type { PickedImage } from "./images";
 import { greeting } from "./greeting";
 import { applyItinerary } from "./tools";
 import { uid } from "./util";
 
 export type Tab = "home" | "chat" | "itinerary" | "map" | "profile";
+
+/** Auto-compact once this many messages pile up since the last summary. */
+export const COMPACT_EVERY = 10;
+/** Newest messages left as-is, so the latest reply and its quick replies stay visible. */
+const COMPACT_KEEP = 2;
+
+/** Messages a compaction would replace (everything but the newest few). */
+export const compactable = (messages: ChatMessage[]) => messages.slice(0, Math.max(0, messages.length - COMPACT_KEEP));
 
 const msg = (m: Omit<ChatMessage, "id" | "createdAt" | "quickReplies" | "cards"> & Partial<ChatMessage>): ChatMessage =>
   ({ id: uid(), createdAt: Date.now(), quickReplies: [], cards: [], ...m });
@@ -26,7 +37,6 @@ const itineraryUpdateMessage = (changes: string[]) =>
 
 interface AppContextValue {
   ready: boolean;
-  storeKind: TripStore["kind"];
   engine: "gemini" | "offline" | "unknown";
   uid: string;
   trips: Trip[];
@@ -35,47 +45,54 @@ interface AppContextValue {
   setTab: (t: Tab) => void;
   selectedTrip?: Trip;
   selectTrip: (id: string, tab?: Tab) => void;
-  startNewTrip: (destination?: Destination) => Promise<void>;
+  startNewTrip: () => Promise<void>;
   deleteTrip: (id: string) => Promise<void>;
   setStatus: (trip: Trip, status: TripStatus) => Promise<void>;
   applyItinerary: (trip: Trip, ops: ItineraryOp[]) => Promise<void>;
   subscribeMessages: (tripId: string, cb: (m: ChatMessage[]) => void) => () => void;
   sendChat: (trip: Trip, text: string, history: ChatMessage[]) => Promise<void>;
+  /** Summarizes all but the newest messages and deletes the originals from the database. */
+  compactChat: (trip: Trip, messages: ChatMessage[]) => Promise<void>;
   saveProfile: (p: UserProfile) => Promise<void>;
+  /** Saves an uploaded/generated image on the trip, a stop or the profile (null removes it). Replaced files are deleted. */
+  setTripCover: (trip: Trip, image: PickedImage | null) => Promise<void>;
+  setStopImage: (trip: Trip, itemId: string, image: PickedImage | null) => Promise<void>;
+  setAvatar: (file: File) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 const SELECTED_KEY = "toucan-trip:selected";
 
-export function AppProvider({ children }: { children: ReactNode }) {
+export function AppProvider({ userId, children }: { userId: string; children: ReactNode }) {
+  const { user, idToken } = useAuth();
   const storeRef = useRef<TripStore | null>(null);
   const [ready, setReady] = useState(false);
-  const [storeKind, setStoreKind] = useState<TripStore["kind"]>("local");
   const [engine, setEngine] = useState<AppContextValue["engine"]>("unknown");
-  const [userId, setUserId] = useState("local-user");
   const [trips, setTrips] = useState<Trip[]>([]);
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [tab, setTabState] = useState<Tab>("home");
   const [selectedId, setSelectedId] = useState<string | undefined>();
 
   useEffect(() => {
+    const store = new SupabaseStore(userId);
+    storeRef.current = store;
+    let cancelled = false;
     let off: (() => void) | undefined;
     (async () => {
-      const store = await createStore();
-      storeRef.current = store;
-      setStoreKind(store.kind);
-      const id = await store.init();
-      setUserId(id);
-      const saved = await store.getProfile(id);
-      if (saved) setProfile({ ...DEFAULT_PROFILE, ...saved });
+      const saved = await store.getProfile();
+      if (cancelled) return;
+      setProfile({ ...DEFAULT_PROFILE, ...saved, name: saved?.name || user?.displayName || "" });
       try { setSelectedId(localStorage.getItem(SELECTED_KEY) ?? undefined); } catch { /* ignore */ }
-      off = store.subscribeTrips(id, setTrips);
-      setReady(true);
+      let first = true;
+      off = store.subscribeTrips((t) => {
+        setTrips(t);
+        if (first) { first = false; setReady(true); }
+      });
     })().catch((e) => { console.error(e); setReady(true); });
     fetch("/api/chat").then((r) => r.json()).then((j) => setEngine(j.engine)).catch(() => setEngine("offline"));
-    return () => off?.();
-  }, []);
+    return () => { cancelled = true; off?.(); store.dispose(); };
+  }, [userId]); // `user` only seeds the default name
 
   // Keep a valid selection.
   useEffect(() => {
@@ -99,15 +116,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const selectTrip = useCallback((id: string, t: Tab = "itinerary") => { setSelectedId(id); setTab(t); }, [setTab]);
 
-  const startNewTrip = useCallback(async (destination?: Destination) => {
+  const startNewTrip = useCallback(async () => {
     const now = Date.now();
     const trip: Trip = { id: uid(), ownerId: userId, title: "New Trip", status: "dreaming", itinerary: [], currency: "USD", createdAt: now, updatedAt: now };
-    if (destination) {
-      const city = findCity(destination.destination);
-      trip.destination = city?.name ?? destination.destination;
-      trip.title = `${destination.destination.split(",")[0]} Adventure`;
-      trip.coverImageUrl = destination.imageUrl ?? city?.cover;
-    }
     await store().saveTrip(trip);
     const hello = greeting(trip, profile);
     await store().addMessage(trip.id, botMessage(hello.text, hello.quickReplies));
@@ -115,7 +126,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTab("chat");
   }, [userId, profile, setTab]);
 
-  const deleteTrip = useCallback(async (id: string) => { await store().deleteTrip(id); }, []);
+  const deleteTrip = useCallback(async (id: string) => {
+    const trip = trips.find((t) => t.id === id);
+    await store().deleteTrip(id);
+    if (!trip) return;
+    const images = [trip.coverImageUrl, ...trip.itinerary.flatMap((d) => d.items.map((i) => i.imageUrl))];
+    await Promise.all(images.map(removeImage)); // ignores URLs we didn't store (e.g. Wikimedia)
+  }, [trips]);
 
   const setStatus = useCallback(async (trip: Trip, status: TripStatus) => {
     await store().saveTrip({ ...trip, status, updatedAt: Date.now() });
@@ -134,7 +151,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
         body: JSON.stringify({ text, trip, history: history.slice(-30), profile }),
       });
       const data = (await res.json()) as ChatResponse & { error?: string };
@@ -147,22 +164,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       await s.addMessage(trip.id, botMessage(`Oops, my wings got tangled 🪶 (${e instanceof Error ? e.message : "network error"}). Want to try again?`, [text]));
     }
-  }, [profile]);
+  }, [profile, idToken]);
+
+  const compactChat = useCallback(async (trip: Trip, messages: ChatMessage[]) => {
+    const old = compactable(messages);
+    if (old.length < 2) return;
+    const res = await fetch("/api/chat/compact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+      body: JSON.stringify({ trip, messages: old }),
+    });
+    const data = (await res.json()) as { text?: string; error?: string };
+    if (!res.ok || !data.text) throw new Error(data.error || `HTTP ${res.status}`);
+    await store().compactMessages(trip.id, old.map((m) => m.id), msg({ role: "bot", type: "summary", text: data.text }));
+  }, [idToken]);
 
   const saveProfile = useCallback(async (p: UserProfile) => {
     setProfile(p);
-    await store().saveProfile(userId, p);
-  }, [userId]);
+    await store().saveProfile(p);
+  }, []);
+
+  const setTripCover = useCallback(async (trip: Trip, image: PickedImage | null) => {
+    await store().saveTrip({ ...trip, coverImageUrl: image?.url, updatedAt: Date.now() });
+    if (trip.coverImageUrl !== image?.url) await removeImage(trip.coverImageUrl);
+  }, []);
+
+  const setStopImage = useCallback(async (trip: Trip, itemId: string, image: PickedImage | null) => {
+    const old = trip.itinerary.flatMap((d) => d.items).find((i) => i.id === itemId)?.imageUrl;
+    const itinerary = trip.itinerary.map((d) => ({
+      ...d,
+      // imageSearched: a removed photo shouldn't be replaced by the Wikipedia lookup on the next turn.
+      items: d.items.map((i) => (i.id === itemId ? { ...i, imageUrl: image?.url, imageCredit: image?.credit, imageSearched: true } : i)),
+    }));
+    await store().saveTrip({ ...trip, itinerary, updatedAt: Date.now() });
+    if (old !== image?.url) await removeImage(old);
+  }, []);
+
+  const setAvatar = useCallback(async (file: File) => {
+    const url = await uploadImage(userId, "avatars", file);
+    const previous = profile.avatarUrl;
+    await saveProfile({ ...profile, avatarUrl: url });
+    await removeImage(previous);
+  }, [userId, profile, saveProfile]);
 
   const subscribeMessages = useCallback((tripId: string, cb: (m: ChatMessage[]) => void) => {
     return storeRef.current ? storeRef.current.subscribeMessages(tripId, cb) : () => {};
   }, []);
 
   const value = useMemo<AppContextValue>(() => ({
-    ready, storeKind, engine, uid: userId, trips, profile, tab, setTab,
+    ready, engine, uid: userId, trips, profile, tab, setTab,
     selectedTrip: trips.find((t) => t.id === selectedId),
-    selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, saveProfile,
-  }), [ready, storeKind, engine, userId, trips, profile, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, saveProfile]);
+    selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, compactChat, saveProfile, setTripCover, setStopImage, setAvatar,
+  }), [ready, engine, userId, trips, profile, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, saveProfile, setTripCover, setStopImage, setAvatar]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

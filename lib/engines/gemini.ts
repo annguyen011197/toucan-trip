@@ -23,7 +23,7 @@ Persona: warm, lightly playful (an occasional bird pun or 🐦 is fine), concise
 Follow this flow, using the [trip state] JSON to see what is already known:
 1. Ask for the destination. If the user has none, suggest 2-3 options based on vibe, season, and budget.
 2. Collect origin, dates, travelers, budget and interests — one or two questions per turn. Save each answer with updateTripInfo as soon as you get it.
-3. When destination, dates and interests are known and the itinerary is empty, generate a draft itinerary with ONE updateItinerary call (3-5 items per day, realistic 24h "HH:mm" times, accurate lat/lng, category, estCost in USD per person), then ask what to adjust.
+3. When destination, dates and interests are known and the itinerary is empty, generate a draft itinerary with ONE updateItinerary call (3-5 items per day, realistic 24h "HH:mm" times, accurate lat/lng, address, category, estCost in USD per person), then ask what to adjust.
 4. Apply edits the user asks for (e.g. "add Kinkaku-ji at 9am on Day 2") with updateItinerary. Use itemId from the trip state for remove/move/edit.
 5. Offer flights, hotels and restaurants with searchFlights / searchHotels / searchPlaces. The app shows their results as cards automatically — don't repeat prices in your text.
 6. When the user confirms the plan, call updateTripInfo with status "upcoming".
@@ -34,12 +34,12 @@ Rules:
 - ALWAYS end every turn by calling \`reply\` with your message and 2-4 short quick replies (chips) whenever choices make sense.
 
 User profile (personalize with it):
-- Name: ${profile.name}
+- Name: ${profile.name || "unknown"}
 - Interests: ${profile.interests.join(", ")}
 - Budget level: ${BUDGET_LABEL[profile.budgetLevel]}
 - Pace: ${profile.pace}
 - Diet: ${profile.diet}
-- Home airport: ${profile.homeAirport}`;
+- Home airport: ${profile.homeAirport || "unknown (ask)"}`;
 }
 
 const S = (description?: string): Schema => ({ type: Type.STRING, description });
@@ -51,6 +51,7 @@ const itemSchema: Schema = {
     time: S("24h HH:mm"),
     title: S("Place or activity name"),
     placeId: S(),
+    address: S("Street address or neighborhood of the place, e.g. \"1 Kinkakujicho, Kita Ward, Kyoto\""),
     lat: { type: Type.NUMBER },
     lng: { type: Type.NUMBER },
     note: S("One-line tip"),
@@ -152,7 +153,9 @@ export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKe
   const contents: Content[] = req.history
     .filter((m) => m.type !== "itineraryUpdate" && m.text.trim())
     .slice(-30)
-    .map((m) => ({ role: m.role === "user" ? "user" : "model", parts: [{ text: m.text }] }));
+    .map((m): Content => m.type === "summary"
+      ? { role: "user", parts: [{ text: `[summary of our earlier conversation]\n${m.text}` }] }
+      : { role: m.role === "user" ? "user" : "model", parts: [{ text: m.text }] });
   contents.push({
     role: "user",
     parts: [{ text: `[today: ${toISODate(new Date())}]\n[trip state]\n${JSON.stringify(snapshot(tools.trip))}\n\n[user]\n${req.text}` }],

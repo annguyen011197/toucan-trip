@@ -3,7 +3,7 @@ import { ALL_INTERESTS, BUDGET_LABEL } from "../types";
 import { ToolExecutor } from "../tools";
 import { draftOps, findCity, suggestions, airportCode } from "../mock-data";
 import { addDays, displayTime, formatDateRange, monthName, normalizeTime, parseDates, toISODate, daysBetween } from "../time";
-import { turn } from "../greeting";
+import { fromHome, turn } from "../greeting";
 import { capitalizeWords, containsAny } from "../util";
 import { geocode } from "../search";
 
@@ -67,9 +67,8 @@ async function handleDestination(input: string, profile: UserProfile, tools: Too
     return turn("Where would you like to go? A city, a country, or just a vibe works!", ["Kyoto, Japan", "Bali, Indonesia", "Surprise me!"]);
   }
   const t = tools.updateTripInfo({ destination: findCity(dest)?.name ?? capitalizeWords(dest) });
-  const home = profile.homeAirport || "SGN";
   return turn(`${t.destination!.split(",")[0]} — great pick! 🌏 Where are you flying from, and when are you thinking of going?`,
-    [`${home} · 5 days next month`, `${home} · next weekend`, `${home} · 1 week in ${monthName(2)}`]);
+    [fromHome(profile, "5 days next month"), fromHome(profile, "next weekend"), fromHome(profile, `1 week in ${monthName(2)}`)]);
 }
 
 // ── Step 2: origin + dates
@@ -80,18 +79,18 @@ async function handleOriginAndDates(input: string, profile: UserProfile, tools: 
   const from = input.match(/from\s+([a-zA-Z\s]+?)(?:\s*[,·]|\s+on\b|\s+in\b|\s+next\b|\s+for\b|$)/i);
   if (iata) origin = iata[1];
   else if (from) origin = capitalizeWords(from[1].trim());
-  else if (containsAny(input, ["home", "usual"])) origin = profile.homeAirport;
+  else if (containsAny(input, ["home", "usual"])) origin = profile.homeAirport || undefined;
 
   const parsed = parseDates(input);
   if (!origin && !parsed.start && !parsed.days) {
     return turn("Hmm, I didn't quite catch that. Which airport are you leaving from, and roughly when?",
-      [`${profile.homeAirport} · 5 days next month`, `${profile.homeAirport} · next weekend`]);
+      [fromHome(profile, "5 days next month"), fromHome(profile, "next weekend")]);
   }
   const start = parsed.start ?? trip.startDate ?? addDays(toISODate(new Date()), 30);
   const days = parsed.days ?? tripDays(trip) ?? 4;
   const t = tools.updateTripInfo({ origin: origin ?? trip.origin ?? profile.homeAirport, startDate: start, endDate: addDays(start, Math.max(0, days - 1)) });
   return turn(
-    `Got it — ${t.origin} → ${t.destination}, ${formatDateRange(t.startDate, t.endDate)} (${days} days). Who's coming along, and what's the budget vibe?`,
+    `Got it — ${t.origin ? `${t.origin} → ` : ""}${t.destination}, ${formatDateRange(t.startDate, t.endDate)} (${days} days). Who's coming along, and what's the budget vibe?`,
     [`Solo · ${BUDGET_LABEL[profile.budgetLevel].toLowerCase()}`, "2 people · mid-range", "2 people · luxury", "Family of 4 · budget"],
   );
 }

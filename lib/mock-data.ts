@@ -1,22 +1,17 @@
-import type { ChatMessage, Destination, ItineraryOp, Pace, PlaceResult, Trip } from "./types";
-import { IMG } from "./images";
-import { applyOps } from "./itinerary-engine";
-import { addDays, toISODate } from "./time";
-import { uid } from "./util";
+import type { ItineraryOp, Pace, PlaceResult } from "./types";
 
 export interface City {
   name: string;
   aliases: string[];
   airport: string;
   center: [number, number];
-  cover?: string;
   areas: string[];
   hotelNames: string[];
   places: PlaceResult[];
   tip: string;
 }
 
-function p(name: string, type: string, lat: number, lng: number, opts: { cost?: number; note: string; image?: string; rating?: number }): PlaceResult {
+function p(name: string, type: string, lat: number, lng: number, opts: { cost?: number; note: string; rating?: number }): PlaceResult {
   const cost = opts.cost ?? 0;
   return {
     placeId: "mock-" + name.toLowerCase().replace(/[^a-z]/g, ""),
@@ -25,22 +20,21 @@ function p(name: string, type: string, lat: number, lng: number, opts: { cost?: 
     priceLevel: cost > 30 ? 3 : cost > 10 ? 2 : 1,
     estCost: cost,
     note: opts.note,
-    imageUrl: opts.image,
   };
 }
 
 export const CITIES: City[] = [
   {
-    name: "Kyoto, Japan", aliases: ["kyoto"], airport: "KIX", center: [35.0116, 135.7681], cover: IMG.kyotoGoldenTemple,
+    name: "Kyoto, Japan", aliases: ["kyoto"], airport: "KIX", center: [35.0116, 135.7681],
     areas: ["Gion", "Downtown", "Kyoto Station"], hotelNames: ["Gion Garden Ryokan", "Kamogawa Riverside Hotel", "Sanjo Design Hostel"],
     places: [
-      p("Nishiki Market", "food", 35.005, 135.7649, { cost: 20, note: "Start your day with local street food. Try the tamagoyaki and fresh soy milk donuts.", image: IMG.nishikiMarket }),
-      p("Kinkaku-ji (Golden Pavilion)", "sight", 35.0394, 135.7292, { cost: 4, note: "Marvel at the Zen temple covered in gold leaf. Best viewed in the morning light.", image: IMG.kinkakuji }),
+      p("Nishiki Market", "food", 35.005, 135.7649, { cost: 20, note: "Start your day with local street food. Try the tamagoyaki and fresh soy milk donuts." }),
+      p("Kinkaku-ji (Golden Pavilion)", "sight", 35.0394, 135.7292, { cost: 4, note: "Marvel at the Zen temple covered in gold leaf. Best viewed in the morning light." }),
       p("Zen Lunch & Tea Ceremony", "food", 35.0345, 135.7182, { cost: 45, note: "Enjoy traditional Shojin Ryori (Buddhist vegetarian cuisine) followed by a ceremony." }),
       p("Arashiyama Bamboo Grove", "activity", 35.017, 135.6713, { note: "A meditative walk through the towering bamboo stalks. Great for photography." }),
       p("Fushimi Inari Taisha", "sight", 34.9671, 135.7727, { note: "Thousands of vermilion torii gates. Go early to beat the crowds." }),
       p("Kiyomizu-dera", "sight", 34.9949, 135.785, { cost: 3, note: "Wooden stage temple with sweeping city views." }),
-      p("Gion Evening Stroll", "nightlife", 35.0037, 135.7788, { note: "Lantern-lit lanes of the geisha district.", image: IMG.gion }),
+      p("Gion Evening Stroll", "nightlife", 35.0037, 135.7788, { note: "Lantern-lit lanes of the geisha district." }),
       p("Philosopher's Path", "activity", 35.0236, 135.7944, { note: "Canal-side walk lined with cherry trees." }),
       p("Ginkaku-ji (Silver Pavilion)", "sight", 35.027, 135.7982, { cost: 4, note: "Moss gardens and a sand sculpture of Mt. Fuji." }),
       p("Pontocho Alley Dinner", "food", 35.005, 135.7708, { cost: 40, note: "Narrow alley of izakaya overlooking the Kamo River." }),
@@ -86,7 +80,7 @@ export const CITIES: City[] = [
     tip: "Grab a Viva Viagem card — it works on trams, metro and the ferry.",
   },
   {
-    name: "Amalfi Coast, Italy", aliases: ["amalfi", "positano", "ravello"], airport: "NAP", center: [40.634, 14.6027], cover: IMG.amalfiCoast,
+    name: "Amalfi Coast, Italy", aliases: ["amalfi", "positano", "ravello"], airport: "NAP", center: [40.634, 14.6027],
     areas: ["Positano", "Amalfi", "Ravello"], hotelNames: ["Positano Cliff Suites", "Amalfi Lemon House", "Ravello Garden Inn"],
     places: [
       p("Positano Beach", "activity", 40.6281, 14.485, { note: "Pastel houses tumbling to the sea." }),
@@ -101,7 +95,7 @@ export const CITIES: City[] = [
     tip: "Ferries are faster than the coastal bus in summer — buy tickets at the pier.",
   },
   {
-    name: "Banff, Canada", aliases: ["banff", "hidden valley", "lake louise"], airport: "YYC", center: [51.1784, -115.5708], cover: IMG.hiddenValley,
+    name: "Banff, Canada", aliases: ["banff", "hidden valley", "lake louise"], airport: "YYC", center: [51.1784, -115.5708],
     areas: ["Banff Town", "Lake Louise", "Canmore"], hotelNames: ["Bow River Lodge", "Lake Louise Chalet", "Canmore Mountain Inn"],
     places: [
       p("Lake Louise", "activity", 51.4254, -116.1773, { note: "Turquoise glacial lake — rent a canoe." }),
@@ -115,7 +109,7 @@ export const CITIES: City[] = [
     tip: "Book the Parks Canada shuttle to Moraine Lake — private cars aren't allowed.",
   },
   {
-    name: "Interlaken, Switzerland", aliases: ["interlaken", "azure peaks", "swiss alps", "jungfrau"], airport: "ZRH", center: [46.6863, 7.8632], cover: IMG.azurePeaks,
+    name: "Interlaken, Switzerland", aliases: ["interlaken", "azure peaks", "swiss alps", "jungfrau"], airport: "ZRH", center: [46.6863, 7.8632],
     areas: ["Interlaken", "Grindelwald", "Lauterbrunnen"], hotelNames: ["Jungfrau View Hotel", "Grindelwald Chalet", "Lauterbrunnen Valley Hostel"],
     places: [
       p("Harder Kulm", "activity", 46.697, 7.857, { cost: 40, note: "Funicular to the Two Lakes Bridge." }),
@@ -139,13 +133,6 @@ export function airportCode(destination: string): string {
   if (/^[A-Z]{3}$/.test(destination)) return destination;
   return findCity(destination)?.airport ?? destination.slice(0, 3).toUpperCase();
 }
-
-export const HAND_PICKED: Destination[] = [
-  { id: "hidden-valley", title: "Hidden Valley", tag: "Nature", imageUrl: IMG.hiddenValley, destination: "Banff, Canada", blurb: "Glacial lakes and quiet trails" },
-  { id: "azure-peaks", title: "Azure Peaks", tag: "Adventure", imageUrl: IMG.azurePeaks, destination: "Interlaken, Switzerland", blurb: "Snowy summits and cliff walks" },
-  { id: "golden-temples", title: "Golden Temples", tag: "Culture", imageUrl: IMG.kyotoPagoda, destination: "Kyoto, Japan", blurb: "Zen gardens and autumn leaves" },
-  { id: "lemon-coast", title: "Lemon Coast", tag: "Coastal", imageUrl: IMG.amalfiCoast, destination: "Amalfi Coast, Italy", blurb: "Cliffside villages and seafood" },
-];
 
 export function suggestions(interests: string[], month: number): [string, string][] {
   const lower = interests.map((i) => i.toLowerCase());
@@ -208,54 +195,4 @@ export function draftOps(destination: string, days: number, interests: string[],
     if (used.size >= pool.length) used.clear();
   }
   return ops;
-}
-
-// ───────────── Seed data ─────────────
-
-const botMsg = (text: string, quickReplies: string[] = [], createdAt = Date.now()): ChatMessage =>
-  ({ id: uid(), role: "bot", type: quickReplies.length ? "quickReplies" : "text", text, quickReplies, cards: [], createdAt });
-
-export function seedTrips(ownerId: string): { trip: Trip; messages: ChatMessage[] }[] {
-  const today = toISODate(new Date());
-  const now = Date.now();
-
-  const amalfiStart = addDays(today, 24);
-  const amalfi: Trip = {
-    id: uid(), ownerId, title: "Amalfi Coast, Italy", destination: "Amalfi Coast, Italy", origin: "SGN",
-    startDate: amalfiStart, endDate: addDays(amalfiStart, 7), travelers: 2, budget: "Mid-range", interests: ["Food", "Nature"],
-    status: "upcoming", coverImageUrl: IMG.amalfiCoast, itinerary: [], currency: "USD",
-    hotel: { name: "Amalfi Lemon House", lat: 40.6352, lng: 14.601, address: "Amalfi" },
-    createdAt: now - 7200_000, updatedAt: now - 60_000,
-  };
-  amalfi.itinerary = applyOps(draftOps("Amalfi Coast, Italy", 3, ["Food", "Nature"], "relaxed"), [], amalfiStart).itinerary;
-
-  const kyotoStart = addDays(today, 36);
-  const k = findCity("kyoto")!.places;
-  const add = (day: number, time: string, pl: PlaceResult, tags?: string[]): ItineraryOp => ({
-    action: "add", day, item: { time, title: pl.name, placeId: pl.placeId, lat: pl.lat, lng: pl.lng, note: pl.note, category: pl.type, estCost: pl.estCost, imageUrl: pl.imageUrl, tags },
-  });
-  const kyoto: Trip = {
-    id: uid(), ownerId, title: "Kyoto Adventure", destination: "Kyoto, Japan", origin: "SGN",
-    startDate: kyotoStart, endDate: addDays(kyotoStart, 3), travelers: 2, budget: "Mid-range", interests: ["Temples & History", "Food"],
-    status: "dreaming", coverImageUrl: IMG.kyotoPagoda, itinerary: [], currency: "USD",
-    hotel: { name: "Gion Garden Ryokan", lat: 35.0029, lng: 135.7756, address: "Gion, Kyoto" },
-    createdAt: now - 3600_000, updatedAt: now,
-  };
-  kyoto.itinerary = applyOps([
-    add(1, "08:00", k[0]), add(1, "10:30", k[1], ["Must see", "UNESCO site"]), add(1, "13:00", k[2]), add(1, "15:30", k[3]),
-    add(2, "07:30", k[4]), add(2, "11:00", k[5]), add(2, "13:00", k[9]), add(2, "18:30", k[6]),
-    add(3, "09:30", k[7]), add(3, "11:00", k[8]), add(3, "13:30", k[13]), add(3, "16:00", k[11]),
-    add(4, "09:30", k[12]), add(4, "12:30", k[10]),
-  ], [], kyotoStart).itinerary;
-
-  const base = now - 3600_000;
-  const kyotoMsgs: ChatMessage[] = [
-    botMsg("I've been soaring over some maps and I've found some hidden gems in Kyoto! Based on your love for zen gardens, how does a temple tour on Day 2 sound?", [], base),
-    { id: uid(), role: "user", type: "text", text: "That sounds perfect. Let's add Kinkaku-ji in the morning before it gets too crowded.", quickReplies: [], cards: [], createdAt: base + 20_000 },
-    { id: uid(), role: "bot", type: "itineraryUpdate", text: "", quickReplies: [], createdAt: base + 40_000,
-      cards: [{ id: uid(), kind: "itineraryUpdate", title: "Itinerary updated", changes: ["Added Kinkaku-ji (Golden Pavilion) · Day 1, 10:30 AM"] }] },
-    botMsg("Great choice. Kinkaku-ji (The Golden Pavilion) is stunning in the morning light. I've updated the itinerary. Would you like a lunch recommendation nearby?", ["Yes, Japanese cuisine", "Maybe later"], base + 60_000),
-  ];
-  const amalfiMsgs = [botMsg("Your Amalfi Coast trip is confirmed! 🍋 Want me to look at hotels or add a boat tour?", ["Find hotels", "Add a boat tour on Day 2"], now - 60_000)];
-  return [{ trip: kyoto, messages: kyotoMsgs }, { trip: amalfi, messages: amalfiMsgs }];
 }

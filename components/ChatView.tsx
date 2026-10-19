@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, BedDouble, CalendarCheck, CalendarDays, Map as MapIcon, MoreHorizontal, Plane, SendHorizontal, Share2, Star, Utensils, User, BadgeCheck } from "lucide-react";
-import { useApp } from "@/lib/app-state";
+import { ArrowRight, BedDouble, CalendarCheck, CalendarDays, ChevronDown, FoldVertical, Loader2, Map as MapIcon, MoreHorizontal, Plane, SendHorizontal, Share2, Star, Utensils, User, BadgeCheck } from "lucide-react";
+import { COMPACT_EVERY, compactable, useApp } from "@/lib/app-state";
 import type { Card, ChatMessage, Trip } from "@/lib/types";
 import { displayTime } from "@/lib/time";
 import { money, cn } from "@/lib/util";
@@ -27,16 +27,63 @@ export async function shareTrip(trip: Trip) {
 }
 
 export function ChatView({ tripId }: { tripId: string }) {
-  const { trips, subscribeMessages, sendChat, setTab } = useApp();
+  const { trips, subscribeMessages, sendChat, compactChat, setTab } = useApp();
   const trip = trips.find((t) => t.id === tripId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [thinking, setThinking] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [compacting, setCompacting] = useState(false);
+  const compactingRef = useRef(false);
+  const autoFailedAt = useRef(-1);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => subscribeMessages(tripId, setMessages), [tripId, subscribeMessages]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages.length, thinking]);
+
+  // Grow with the text, up to ~5 lines, then scroll.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [draft]);
+
+  /** Desktop: Enter sends, Shift+Enter adds a line. Touch keyboards: Enter always adds a line (send with the button). */
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+    if (window.matchMedia("(pointer: coarse)").matches) return;
+    e.preventDefault();
+    send(draft);
+  };
+
+  const compact = async (auto: boolean) => {
+    if (!trip || compactingRef.current) return;
+    compactingRef.current = true;
+    setCompacting(true);
+    try {
+      await compactChat(trip, messages);
+    } catch (e) {
+      if (auto) { autoFailedAt.current = messages.length; console.error("[compact]", e); }
+      else alert(`Couldn't compact the chat: ${e instanceof Error ? e.message : "unknown error"}`);
+    } finally {
+      compactingRef.current = false;
+      setCompacting(false);
+    }
+  };
+
+  // Auto-compact every COMPACT_EVERY messages since the last summary (between turns only; no retry loop on failure).
+  const sinceSummary = messages.length - 1 - messages.findLastIndex((m) => m.type === "summary");
+  useEffect(() => {
+    if (sinceSummary >= COMPACT_EVERY && !thinking && autoFailedAt.current !== messages.length) compact(true);
+  }, [sinceSummary, thinking]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const compactCount = compactable(messages).length;
+  const manualCompact = () => {
+    setMenu(false);
+    if (confirm(`Summarize ${compactCount} older messages and delete them? This can't be undone.`)) compact(false);
+  };
 
   const send = async (raw: string) => {
     const text = raw.trim();
@@ -66,6 +113,7 @@ export function ChatView({ tripId }: { tripId: string }) {
             <div className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-2xl bg-white py-1 shadow-card">
               <MenuItem icon={<CalendarDays className="h-4 w-4" />} onClick={() => setTab("itinerary")}>View itinerary</MenuItem>
               <MenuItem icon={<MapIcon className="h-4 w-4" />} onClick={() => setTab("map")}>Show on map</MenuItem>
+              <MenuItem icon={<FoldVertical className="h-4 w-4" />} onClick={manualCompact} disabled={compacting || compactCount < 2}>Compact chat</MenuItem>
               {trip?.status === "dreaming" && (
                 <MenuItem icon={<BadgeCheck className="h-4 w-4" />} onClick={() => { setMenu(false); send("Looks good, confirm!"); }}>Confirm trip</MenuItem>
               )}
@@ -83,6 +131,11 @@ export function ChatView({ tripId }: { tripId: string }) {
           <MessageRow key={m.id} message={m} onAction={(c) => c.actionText && send(c.actionText)} onOpenItinerary={() => setTab("itinerary")} />
         ))}
         {thinking && <TypingRow />}
+        {compacting && (
+          <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-muted">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Compacting earlier messages…
+          </div>
+        )}
         {chips.length > 0 && (
           <div className="no-scrollbar rise flex gap-2.5 overflow-x-auto py-1 pl-[46px]">
             {chips.map((c, i) => <Chip key={c + i} highlighted={i === 0} onClick={() => send(c)}>{c}</Chip>)}
@@ -93,9 +146,10 @@ export function ChatView({ tripId }: { tripId: string }) {
 
       {/* Input */}
       <form className="border-t border-line/60 bg-white px-4 py-2.5" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
-        <div className="flex items-center gap-2 rounded-full border border-line bg-bg py-1.5 pr-1.5 pl-5">
-          <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask Travel AI..." aria-label="Message"
-            className="min-w-0 flex-1 bg-transparent py-1.5 text-base outline-none placeholder:text-muted" />
+        <div className="flex items-end gap-2 rounded-[26px] border border-line bg-bg py-1.5 pr-1.5 pl-5">
+          <textarea ref={inputRef} rows={1} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown}
+            placeholder="Ask Travel AI..." aria-label="Message"
+            className="no-scrollbar min-w-0 flex-1 resize-none self-center bg-transparent py-1.5 text-base leading-6 outline-none placeholder:text-muted" />
           <button type="submit" aria-label="Send" disabled={!draft.trim() || thinking}
             className="flex h-10 w-10 items-center justify-center rounded-full text-primary transition disabled:text-muted">
             <SendHorizontal className="h-6 w-6" fill="currentColor" />
@@ -106,8 +160,13 @@ export function ChatView({ tripId }: { tripId: string }) {
   );
 }
 
-function MenuItem({ icon, children, onClick }: { icon: React.ReactNode; children: React.ReactNode; onClick: () => void }) {
-  return <button onClick={onClick} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm hover:bg-surface">{icon}{children}</button>;
+function MenuItem({ icon, children, onClick, disabled }: { icon: React.ReactNode; children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button onClick={onClick} disabled={disabled}
+      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm hover:bg-surface disabled:pointer-events-none disabled:opacity-40">
+      {icon}{children}
+    </button>
+  );
 }
 
 function timestamp(ms: number) {
@@ -129,6 +188,7 @@ function MessageRow({ message, onAction, onOpenItinerary }: { message: ChatMessa
       </div>
     );
   }
+  if (message.type === "summary") return <SummaryCard text={message.text} />;
   if (message.type === "itineraryUpdate" && message.cards[0]) {
     return <UpdateCard card={message.cards[0]} onOpen={onOpenItinerary} />;
   }
@@ -146,6 +206,21 @@ function MessageRow({ message, onAction, onOpenItinerary }: { message: ChatMessa
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function SummaryCard({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rise mx-6 rounded-2xl border border-dashed border-line bg-bg px-4 py-3">
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left text-xs font-semibold tracking-wider text-ink-2 uppercase">
+        <FoldVertical className="h-3.5 w-3.5" />
+        <span className="flex-1">Earlier messages compacted</span>
+        <ChevronDown className={cn("h-4 w-4 transition", open && "rotate-180")} />
+      </button>
+      {open && <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap text-ink-2">{text}</p>}
     </div>
   );
 }

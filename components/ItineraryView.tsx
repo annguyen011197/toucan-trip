@@ -2,23 +2,25 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Check, Footprints, GripVertical, Lightbulb, Map as MapIcon, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, WandSparkles, X } from "lucide-react";
+import { ArrowLeft, Camera, Check, Footprints, ImagePlus, GripVertical, Lightbulb, Map as MapIcon, MapPin, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, WandSparkles, X } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useApp } from "@/lib/app-state";
 import { TRIP_STATUSES, type ItineraryItem, type Trip } from "@/lib/types";
-import { dayCost, travelLeg } from "@/lib/itinerary-engine";
+import { dayCost, googleMapsUrl, travelLeg } from "@/lib/itinerary-engine";
 import { findCity } from "@/lib/mock-data";
 import { displayTime, formatDateRange, formatLongDate } from "@/lib/time";
 import { cn, money } from "@/lib/util";
 import { PrimaryButton, RemoteImage } from "./ui";
 import { shareTrip } from "./ChatView";
+import { ImagePicker } from "./ImagePicker";
 
 const TripMap = dynamic(() => import("./TripMap"), { ssr: false, loading: () => <div className="h-full w-full animate-pulse bg-surface" /> });
 
 export function ItineraryView({ trip }: { trip: Trip }) {
-  const { setTab, applyItinerary, setStatus } = useApp();
+  const { setTab, applyItinerary, setStatus, setTripCover, setStopImage } = useApp();
+  const [picker, setPicker] = useState<{ kind: "cover" } | { kind: "stop"; item: ItineraryItem }>();
   const [selectedDay, setSelectedDay] = useState(1);
   const [menu, setMenu] = useState(false);
   const day = trip.itinerary.find((d) => d.day === selectedDay);
@@ -39,6 +41,8 @@ export function ItineraryView({ trip }: { trip: Trip }) {
     const to = day.items.findIndex((i) => i.id === e.over!.id);
     applyItinerary(trip, [{ action: "move", day: day.day, itemId: String(e.active.id), toDay: day.day, toIndex: to }]);
   };
+
+  const place = trip.destination ?? trip.title;
 
   const remove = (item: ItineraryItem) => applyItinerary(trip, [{ action: "remove", day: selectedDay, itemId: item.id }]);
 
@@ -70,8 +74,12 @@ export function ItineraryView({ trip }: { trip: Trip }) {
       <div className="space-y-5 pt-4" onClick={() => menu && setMenu(false)}>
         {/* Hero */}
         <div className="relative mx-5 h-[180px] overflow-hidden rounded-card shadow-[0_6px_16px_rgb(0_0_0/0.12)]">
-          <RemoteImage src={trip.coverImageUrl ?? city?.cover} seed={trip.id} className="absolute inset-0" />
+          <RemoteImage src={trip.coverImageUrl} seed={trip.id} className="absolute inset-0" />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent from-30% to-black/60" />
+          <button aria-label="Change cover photo" onClick={() => setPicker({ kind: "cover" })}
+            className="absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-ink-2 backdrop-blur">
+            <Camera className="h-4 w-4" />
+          </button>
           <div className="absolute bottom-4 left-5 text-white">
             <div className="text-2xl font-bold">{trip.destination ?? "Destination TBD"}</div>
             <div className="text-sm opacity-90">{formatDateRange(trip.startDate, trip.endDate).replace(" - ", " — ")}</div>
@@ -119,7 +127,8 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                   <SortableContext items={day.items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
                     {day.items.map((item, idx) => (
                       <TimelineRow key={item.id} item={item} first={idx === 0} last={idx === day.items.length - 1}
-                        next={day.items[idx + 1]} onRemove={() => remove(item)} />
+                        next={day.items[idx + 1]} destination={trip.destination} onRemove={() => remove(item)}
+                        onImage={() => setPicker({ kind: "stop", item })} />
                     ))}
                   </SortableContext>
                 </DndContext>
@@ -164,11 +173,23 @@ export function ItineraryView({ trip }: { trip: Trip }) {
           </div>
         )}
       </div>
+
+      {picker?.kind === "cover" && (
+        <ImagePicker title="Trip cover" folder="covers" current={trip.coverImageUrl} onClose={() => setPicker(undefined)}
+          defaultPrompt={`Scenic view of ${place}`} onPick={(img) => setTripCover(trip, img)} />
+      )}
+      {picker?.kind === "stop" && (
+        <ImagePicker title={picker.item.title} folder="stops" current={picker.item.imageUrl} onClose={() => setPicker(undefined)}
+          defaultPrompt={[picker.item.title, trip.destination].filter(Boolean).join(", ")}
+          onPick={(img) => setStopImage(trip, picker.item.id, img)} />
+      )}
     </div>
   );
 }
 
-function TimelineRow({ item, first, last, next, onRemove }: { item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; onRemove: () => void }) {
+function TimelineRow({ item, first, last, next, destination, onRemove, onImage }: {
+  item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; destination?: string; onRemove: () => void; onImage: () => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
   const leg = next ? travelLeg(item, next) : undefined;
   return (
@@ -185,14 +206,27 @@ function TimelineRow({ item, first, last, next, onRemove }: { item: ItineraryIte
           <GripVertical className="h-3.5 w-3.5 text-muted/60" />
           <span className="flex-1" />
           {item.estCost > 0 && <span className="text-xs font-medium text-ink-2">{money(item.estCost)}</span>}
+          <button aria-label={`Photo for ${item.title}`} onPointerDown={(e) => e.stopPropagation()} onClick={onImage}
+            className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
+            <ImagePlus className="h-3.5 w-3.5" />
+          </button>
           <button aria-label={`Remove ${item.title}`} onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
             className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
         <div className="mt-1 text-base font-semibold">{item.title}</div>
+        <a href={googleMapsUrl(item, destination)} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => e.stopPropagation()}
+          className="mt-1 flex w-fit max-w-full items-start gap-1 text-[13px] font-medium text-primary hover:underline">
+          <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0">{item.address ?? "Open in Google Maps"}</span>
+        </a>
         {item.note && <p className="mt-1 text-sm leading-relaxed text-ink-2">{item.note}</p>}
-        {item.imageUrl && <RemoteImage src={item.imageUrl} seed={item.id} className="mt-2.5 h-[120px] rounded-2xl" />}
+        {item.imageUrl && <RemoteImage src={item.imageUrl} seed={item.id} alt={item.title} className="mt-2.5 h-[120px] rounded-2xl" />}
+        {item.imageUrl && item.imageCredit && (item.imageCredit.url ? (
+          <a href={item.imageCredit.url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => e.stopPropagation()}
+            className="mt-1 block truncate text-[11px] text-muted hover:underline">{item.imageCredit.text}</a>
+        ) : <div className="mt-1 truncate text-[11px] text-muted">{item.imageCredit.text}</div>)}
         {item.tags?.length ? (
           <div className="mt-2.5 flex flex-wrap gap-2">
             {item.tags.map((t) => <span key={t} className="rounded-full bg-primary-soft px-2.5 py-1 text-[10px] font-bold tracking-wider text-cta uppercase">{t}</span>)}

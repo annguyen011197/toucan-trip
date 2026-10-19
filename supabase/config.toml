@@ -1,0 +1,7 @@
+# Local development (`supabase start`). For a hosted project, enable the same integration in
+# Dashboard › Authentication › Sign In / Providers › Third-Party Auth › Firebase.
+project_id = "toucan-trip"
+
+[auth.third_party.firebase]
+enabled = true
+project_id = "env(FIREBASE_PROJECT_ID)"
