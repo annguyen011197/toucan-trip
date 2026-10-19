@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-work-sans), ui-sans-serif, system-ui, sans-serif;
+
+  --color-primary: #1a7fe8;
+  --color-cta: #0b5cad;
+  --color-surface: #f0f3f8;
+  --color-bg: #f7f9fc;
+  --color-ink: #111827;
+  --color-ink-2: #5e6b80;
+  --color-muted: #94a3b8;
+  --color-line: #e2e8f0;
+  --color-tertiary: #ce6000;
+  --color-primary-soft: #e8f1fc;
+
+  --radius-card: 24px;
+  --radius-bubble: 20px;
+
+  --shadow-card: 0 6px 24px rgb(11 42 74 / 0.08);
+  --shadow-cta: 0 8px 20px rgb(11 92 173 / 0.3);
+}
+
+html,
+body {
+  background: #e9eef5;
+  color: var(--color-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+@keyframes typing {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+.typing-dot { animation: typing 1.2s infinite ease-in-out; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: rise 0.25s ease-out both; }
+
+/* Leaflet: keep controls under the app chrome */
+.leaflet-container { font-family: inherit; background: #eef2f6; }
+.leaflet-top, .leaflet-bottom { z-index: 400; }
+.stop-pin { background: transparent; border: 0; }

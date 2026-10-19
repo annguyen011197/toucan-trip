@@ -1,0 +1,70 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { BedDouble, Footprints, TramFront } from "lucide-react";
+import type { Trip } from "@/lib/types";
+import { hasLocation, travelLeg } from "@/lib/itinerary-engine";
+import { displayTime } from "@/lib/time";
+import { cn } from "@/lib/util";
+
+const TripMap = dynamic(() => import("./TripMap"), { ssr: false, loading: () => <div className="h-full w-full animate-pulse bg-surface" /> });
+
+export function MapScreen({ trip }: { trip: Trip }) {
+  const [day, setDay] = useState(trip.itinerary[0]?.day ?? 1);
+  const [focused, setFocused] = useState<string | undefined>();
+  const items = (trip.itinerary.find((d) => d.day === day)?.items ?? []).filter(hasLocation);
+
+  useEffect(() => {
+    if (!trip.itinerary.some((d) => d.day === day)) setDay(trip.itinerary[0]?.day ?? 1);
+  }, [trip.itinerary, day]);
+
+  return (
+    <div className="relative h-[calc(100dvh-76px-env(safe-area-inset-bottom))]">
+      <TripMap trip={trip} day={day} focusedId={focused} onSelect={setFocused} />
+
+      {/* Day picker */}
+      <div className="no-scrollbar absolute inset-x-0 top-0 z-[500] flex gap-2 overflow-x-auto px-4 pt-[max(12px,env(safe-area-inset-top))] pb-2">
+        {trip.itinerary.map((d) => (
+          <button key={d.day} onClick={() => { setDay(d.day); setFocused(undefined); }}
+            className={cn("shrink-0 rounded-full px-4 py-2.5 text-sm font-semibold shadow-[0_2px_8px_rgb(0_0_0/0.12)]",
+              d.day === day ? "bg-primary text-white" : "bg-white text-ink")}>
+            Day {d.day}
+          </button>
+        ))}
+      </div>
+
+      {/* Stops carousel */}
+      <div className="no-scrollbar absolute inset-x-0 bottom-0 z-[500] flex gap-3 overflow-x-auto px-4 py-3">
+        {trip.hotel && hasLocation(trip.hotel) && (
+          <div className="flex w-[220px] shrink-0 items-center gap-3 rounded-[20px] bg-white p-3.5 shadow-card">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-tertiary text-white"><BedDouble className="h-4 w-4" /></span>
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-tertiary">Your stay</div>
+              <div className="truncate text-[15px] font-semibold">{trip.hotel.name}</div>
+            </div>
+          </div>
+        )}
+        {items.map((it, idx) => {
+          const leg = items[idx + 1] ? travelLeg(it, items[idx + 1]) : undefined;
+          return (
+            <button key={it.id} onClick={() => setFocused(it.id)}
+              className={cn("flex w-[250px] shrink-0 items-center gap-3 rounded-[20px] bg-white p-3.5 text-left shadow-card ring-2 transition",
+                focused === it.id ? "ring-primary" : "ring-transparent")}>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[15px] font-bold text-white">{idx + 1}</span>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-primary">{displayTime(it.time)}</div>
+                <div className="truncate text-[15px] font-semibold">{it.title}</div>
+                {leg && (
+                  <div className="flex items-center gap-1 text-[11px] text-muted">
+                    {leg.mode === "walk" ? <Footprints className="h-3 w-3" /> : <TramFront className="h-3 w-3" />} {leg.minutes} min to next
+                  </div>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

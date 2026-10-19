@@ -1,0 +1,210 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { ArrowLeft, Check, Footprints, GripVertical, Lightbulb, Map as MapIcon, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, WandSparkles, X } from "lucide-react";
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useApp } from "@/lib/app-state";
+import { TRIP_STATUSES, type ItineraryItem, type Trip } from "@/lib/types";
+import { dayCost, travelLeg } from "@/lib/itinerary-engine";
+import { findCity } from "@/lib/mock-data";
+import { displayTime, formatDateRange, formatLongDate } from "@/lib/time";
+import { cn, money } from "@/lib/util";
+import { PrimaryButton, RemoteImage } from "./ui";
+import { shareTrip } from "./ChatView";
+
+const TripMap = dynamic(() => import("./TripMap"), { ssr: false, loading: () => <div className="h-full w-full animate-pulse bg-surface" /> });
+
+export function ItineraryView({ trip }: { trip: Trip }) {
+  const { setTab, applyItinerary, setStatus } = useApp();
+  const [selectedDay, setSelectedDay] = useState(1);
+  const [menu, setMenu] = useState(false);
+  const day = trip.itinerary.find((d) => d.day === selectedDay);
+  const city = findCity(trip.destination);
+
+  useEffect(() => {
+    if (!trip.itinerary.some((d) => d.day === selectedDay)) setSelectedDay(trip.itinerary[0]?.day ?? 1);
+  }, [trip.itinerary, selectedDay]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const onDragEnd = (e: DragEndEvent) => {
+    if (!day || !e.over || e.active.id === e.over.id) return;
+    const to = day.items.findIndex((i) => i.id === e.over!.id);
+    applyItinerary(trip, [{ action: "move", day: day.day, itemId: String(e.active.id), toDay: day.day, toIndex: to }]);
+  };
+
+  const remove = (item: ItineraryItem) => applyItinerary(trip, [{ action: "remove", day: selectedDay, itemId: item.id }]);
+
+  return (
+    <div className="min-h-dvh bg-white">
+      {/* Nav */}
+      <header className="sticky top-0 z-[500] flex items-center border-b border-line/70 bg-white/95 px-3 pt-[max(8px,env(safe-area-inset-top))] pb-2 backdrop-blur">
+        <button aria-label="Back" onClick={() => setTab("home")} className="flex h-10 w-10 items-center justify-center"><ArrowLeft className="h-5 w-5" /></button>
+        <div className="flex-1 text-center">
+          <div className="text-[17px] font-bold">{trip.title}</div>
+          <div className="text-[11px] font-semibold tracking-[0.15em] text-primary">AI GENERATED</div>
+        </div>
+        <div className="relative">
+          <button aria-label="Trip status" onClick={() => setMenu((m) => !m)} className="flex h-10 w-10 items-center justify-center"><MoreVertical className="h-5 w-5" /></button>
+          {menu && (
+            <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-2xl bg-white py-1 shadow-card ring-1 ring-line/60">
+              <div className="px-4 pt-2 pb-1 text-[11px] font-bold tracking-widest text-muted uppercase">Status</div>
+              {TRIP_STATUSES.map((s) => (
+                <button key={s} onClick={() => { setMenu(false); setStatus(trip, s); }}
+                  className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm capitalize hover:bg-surface">
+                  {s} {trip.status === s && <Check className="h-4 w-4 text-primary" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </header>
+
+      <div className="space-y-5 pt-4" onClick={() => menu && setMenu(false)}>
+        {/* Hero */}
+        <div className="relative mx-5 h-[180px] overflow-hidden rounded-card shadow-[0_6px_16px_rgb(0_0_0/0.12)]">
+          <RemoteImage src={trip.coverImageUrl ?? city?.cover} seed={trip.id} className="absolute inset-0" />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent from-30% to-black/60" />
+          <div className="absolute bottom-4 left-5 text-white">
+            <div className="text-2xl font-bold">{trip.destination ?? "Destination TBD"}</div>
+            <div className="text-sm opacity-90">{formatDateRange(trip.startDate, trip.endDate).replace(" - ", " — ")}</div>
+          </div>
+        </div>
+
+        <div className="mx-5 flex gap-3">
+          <PrimaryButton color="primary" onClick={() => setTab("chat")}><WandSparkles className="h-5 w-5" /> Continue Planning</PrimaryButton>
+          <button aria-label="Share" onClick={() => shareTrip(trip)} className="flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary"><Share2 className="h-5 w-5" /></button>
+        </div>
+
+        {trip.itinerary.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 px-8 py-8 text-center">
+            <img src="/mascot.webp" alt="" className="w-28" />
+            <div className="font-semibold">Your plan is still a blank map</div>
+            <p className="text-sm text-ink-2">Answer a few questions in Chat and I&apos;ll draft your days.</p>
+          </div>
+        ) : (
+          <>
+            {/* Day tabs */}
+            <div className="no-scrollbar flex gap-2.5 overflow-x-auto px-5">
+              {trip.itinerary.map((d) => (
+                <button key={d.day} onClick={() => setSelectedDay(d.day)} aria-pressed={d.day === selectedDay}
+                  className={cn("flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-2xl transition",
+                    d.day === selectedDay ? "bg-primary text-white shadow-[0_6px_14px_rgb(26_127_232/0.35)]" : "bg-surface text-ink-2")}>
+                  <span className="text-[10px] font-semibold tracking-widest">DAY</span>
+                  <span className="text-xl font-bold">{String(d.day).padStart(2, "0")}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="border-t border-line px-5 pt-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold">Daily Itinerary</h2>
+                <button onClick={() => setTab("map")} className="flex items-center gap-1.5 text-sm font-semibold text-primary"><MapIcon className="h-4 w-4" fill="currentColor" fillOpacity={0.2} /> View Route</button>
+              </div>
+              {day?.date && <div className="mt-1 text-[13px] text-ink-2">{formatLongDate(day.date)}</div>}
+              <div className="mt-0.5 text-xs text-muted">Drag to reorder · tap × to remove</div>
+            </div>
+
+            {/* Timeline */}
+            <div className="px-5">
+              {day && day.items.length > 0 ? (
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+                  <SortableContext items={day.items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+                    {day.items.map((item, idx) => (
+                      <TimelineRow key={item.id} item={item} first={idx === 0} last={idx === day.items.length - 1}
+                        next={day.items[idx + 1]} onRemove={() => remove(item)} />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+              ) : (
+                <p className="py-6 text-sm text-ink-2">Nothing planned for this day yet — ask Travel AI to add something.</p>
+              )}
+            </div>
+
+            {/* Cost */}
+            <div className="mx-5 rounded-card bg-surface p-[18px]">
+              <div className="flex justify-between">
+                <div>
+                  <div className="text-[11px] font-bold tracking-widest text-ink-2">DAY {selectedDay} EST.</div>
+                  <div className="text-xl font-bold">{money(dayCost(day), trip.currency)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[11px] font-bold tracking-widest text-ink-2">ESTIMATED TOTAL</div>
+                  <div className="text-xl font-bold text-primary">{money(trip.itinerary.reduce((s, d) => s + dayCost(d), 0), trip.currency)}</div>
+                </div>
+              </div>
+              <div className="mt-2 text-[11px] text-muted">Activities &amp; food per person · excludes flights and hotel</div>
+            </div>
+          </>
+        )}
+
+        {city?.tip && (
+          <div className="mx-5 rounded-card border border-primary/12 bg-primary-soft/60 p-5">
+            <div className="flex items-center gap-2 font-semibold text-primary"><Lightbulb className="h-5 w-5" fill="currentColor" fillOpacity={0.25} /> AI Travel Tip</div>
+            <p className="mt-2.5 text-sm leading-relaxed text-ink-2 italic">“{city.tip}”</p>
+          </div>
+        )}
+
+        {day && day.items.length > 0 && (
+          <div className="relative mx-5 mb-6 h-[170px] overflow-hidden rounded-card">
+            <div className="pointer-events-none absolute inset-0 grayscale-[70%]">
+              <TripMap trip={trip} day={selectedDay} interactive={false} />
+            </div>
+            <button onClick={() => setTab("map")}
+              className="absolute top-1/2 left-1/2 z-[450] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-ink px-5 py-3 text-[15px] font-semibold text-white">
+              <SquareArrowOutUpRight className="h-4 w-4" /> Explore Map
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TimelineRow({ item, first, last, next, onRemove }: { item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; onRemove: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const leg = next ? travelLeg(item, next) : undefined;
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn("group relative flex gap-3.5 bg-white", isDragging && "z-10 rounded-2xl shadow-card")}>
+      {/* Rail */}
+      <div className="flex w-[18px] shrink-0 flex-col items-center">
+        <span className={cn("mt-1 h-3.5 w-3.5 rounded-full", first ? "bg-primary ring-[5px] ring-primary/25" : "bg-[#CBD5E1]")} />
+        <span className={cn("w-0.5 flex-1", last ? "bg-transparent" : "bg-line")} />
+      </div>
+      <div className={cn("min-w-0 flex-1", last ? "pb-4" : "pb-6")} {...attributes} {...listeners} style={{ touchAction: "manipulation" }}>
+        <div className="flex items-center gap-2">
+          <span className={cn("text-xs font-semibold", first ? "text-primary" : "text-muted")}>{displayTime(item.time)}</span>
+          <GripVertical className="h-3.5 w-3.5 text-muted/60" />
+          <span className="flex-1" />
+          {item.estCost > 0 && <span className="text-xs font-medium text-ink-2">{money(item.estCost)}</span>}
+          <button aria-label={`Remove ${item.title}`} onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
+            className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className="mt-1 text-base font-semibold">{item.title}</div>
+        {item.note && <p className="mt-1 text-sm leading-relaxed text-ink-2">{item.note}</p>}
+        {item.imageUrl && <RemoteImage src={item.imageUrl} seed={item.id} className="mt-2.5 h-[120px] rounded-2xl" />}
+        {item.tags?.length ? (
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {item.tags.map((t) => <span key={t} className="rounded-full bg-primary-soft px-2.5 py-1 text-[10px] font-bold tracking-wider text-cta uppercase">{t}</span>)}
+          </div>
+        ) : null}
+        {leg && (
+          <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-muted">
+            {leg.mode === "walk" ? <Footprints className="h-3.5 w-3.5" /> : <TramFront className="h-3.5 w-3.5" />}
+            {leg.minutes} min {leg.mode} to next stop
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
