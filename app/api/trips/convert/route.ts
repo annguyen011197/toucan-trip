@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { ConvertRequest } from "@/lib/types";
 import { CURRENCIES, convertTripCosts } from "@/lib/currency";
 import { isLang } from "@/lib/i18n";
+import { debugLog } from "@/lib/debug";
 import { translateTrip } from "@/lib/engines/translate";
 import { exchangeRate } from "@/lib/server/rates";
 import { AuthError, verifyRequest } from "@/lib/server/auth";
@@ -30,6 +31,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "trip, language and currency are required" }, { status: 400 });
   }
   let trip = body.trip;
+  const started = Date.now();
+  debugLog("convert", "request", { tripId: trip.id, from: { language: trip.language ?? "en", currency: trip.currency }, to: { language: body.language, currency: body.currency } });
   try {
     if ((trip.language ?? "en") !== body.language) {
       const apiKey = process.env.GEMINI_API_KEY;
@@ -39,6 +42,7 @@ export async function POST(request: Request) {
     if (trip.currency !== body.currency) {
       trip = convertTripCosts(trip, body.currency, await exchangeRate(trip.currency, body.currency));
     }
+    debugLog("convert", `response (${Date.now() - started} ms)`, { title: trip.title, currency: trip.currency, itinerary: trip.itinerary });
     return NextResponse.json({ trip: { ...trip, updatedAt: Date.now() } });
   } catch (e) {
     console.error("[trips/convert]", e);

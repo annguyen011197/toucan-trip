@@ -17,6 +17,8 @@ export interface ItineraryItem {
   lat: number;
   lng: number;
   note: string;
+  /** Practical prep for this stop: what to wear, bring, book ahead, etiquette. */
+  tips?: string[];
   category: ItemCategory;
   estCost: number;
   imageUrl?: string;
@@ -120,6 +122,10 @@ export interface Card {
   /** Text sent to chat when the card's button is tapped, e.g. "Add Nishiki Market". */
   actionText?: string;
   isSample?: boolean;
+  /** Real place from web search; its price is a typical amount, not a quote. */
+  isEstimate?: boolean;
+  /** Google Maps link for the place. */
+  url?: string;
 }
 
 export interface ChatMessage {
@@ -173,6 +179,7 @@ export interface ItineraryItemPatch {
   lat?: number;
   lng?: number;
   note?: string;
+  tips?: string[];
   category?: string;
   estCost?: number;
   imageUrl?: string;
@@ -209,10 +216,14 @@ export interface FlightOffer {
   airline: string; flightNumber: string; origin: string; destination: string;
   departure: string; arrival: string; stops: number; durationMinutes: number; price: number; currency: string;
 }
-export interface HotelOffer { name: string; area: string; rating: number; pricePerNight: number; currency: string; lat: number; lng: number; imageUrl?: string }
+export interface HotelOffer {
+  name: string; area: string; rating: number; pricePerNight: number; currency: string; lat: number; lng: number; imageUrl?: string;
+  address?: string; note?: string; url?: string;
+}
 export interface PlaceResult {
   placeId: string; name: string; type: string; lat: number; lng: number;
   rating?: number; priceLevel?: number; estCost?: number; note?: string; imageUrl?: string;
+  address?: string; currency?: string; url?: string;
 }
 
 /** /api/chat contract */

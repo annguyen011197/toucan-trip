@@ -310,6 +310,16 @@ function TimelineRow({ item, first, last, next, destination, currency, editable,
           <span className="min-w-0">{item.address ?? t("itin.openMaps")}</span>
         </a>
         {item.note && <p className="mt-1 text-sm leading-relaxed text-ink-2">{item.note}</p>}
+        {item.tips?.length ? (
+          <div className="mt-2 rounded-xl bg-primary-soft/60 px-3 py-2">
+            <div className="flex items-center gap-1 text-[11px] font-bold tracking-wider text-cta uppercase">
+              <Lightbulb className="h-3.5 w-3.5" /> {t("itin.prepTips")}
+            </div>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[13px] leading-snug text-ink-2">
+              {item.tips.map((tip, i) => <li key={i}>{tip}</li>)}
+            </ul>
+          </div>
+        ) : null}
         {item.imageUrl && <RemoteImage src={item.imageUrl} seed={item.id} alt={item.title} className="mt-2.5 h-[120px] rounded-2xl" />}
         {item.imageUrl && item.imageCredit && (item.imageCredit.url ? (
           <a href={item.imageCredit.url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => e.stopPropagation()}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, BedDouble, CalendarCheck, CalendarDays, ChevronDown, FoldVertical, Loader2, Map as MapIcon, MoreHorizontal, Plane, SendHorizontal, Share2, Star, Utensils, User, BadgeCheck } from "lucide-react";
+import { ArrowRight, BedDouble, CalendarCheck, CalendarDays, ChevronDown, FoldVertical, Loader2, Map as MapIcon, MoreHorizontal, Plane, SendHorizontal, Share2, Star, Utensils, User, BadgeCheck, MapPin } from "lucide-react";
 import { COMPACT_EVERY, compactable, useApp } from "@/lib/app-state";
 import type { Card, ChatMessage, Trip } from "@/lib/types";
 import { displayTime } from "@/lib/time";
@@ -272,7 +272,14 @@ function ResultCard({ card, onAction }: { card: Card; onAction: () => void }) {
         {!!card.price && <span className="text-[17px] font-bold">{money(card.price, card.currency, lang)}</span>}
         {card.rating && <span className="flex items-center gap-0.5 text-xs font-semibold text-tertiary"><Star className="h-3 w-3" fill="currentColor" />{card.rating.toFixed(1)}</span>}
         <span className="flex-1" />
-        {card.isSample && <span className="text-[10px] font-bold tracking-widest text-muted">{t("chat.sample")}</span>}
+        {card.url && (
+          <a href={card.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-0.5 text-xs font-semibold text-primary hover:underline">
+            <MapPin className="h-3 w-3" />{t("chat.openMaps")}
+          </a>
+        )}
+        {(card.isSample || (card.isEstimate && !!card.price)) && (
+          <span className="text-[10px] font-bold tracking-widest text-muted">{t(card.isSample ? "chat.sample" : "chat.estimate")}</span>
+        )}
       </div>
       {card.actionText && (
         <button onClick={onAction} className="rounded-full bg-primary-soft py-2 text-sm font-semibold text-cta transition active:scale-95">

@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import type { ChatMessage, Trip } from "../types";
 import { LANG_PROMPT_NAME, type Lang } from "../i18n";
+import { debugLog } from "../debug";
 
 const MAX_WORDS = 120;
 
@@ -14,9 +15,12 @@ const transcript = (messages: ChatMessage[]) =>
 export async function summarizeChat(trip: Trip, messages: ChatMessage[], apiKey?: string, lang: Lang = "en"): Promise<string> {
   if (!apiKey) return offlineSummary(trip, messages);
   const ai = new GoogleGenAI({ apiKey });
+  const input = transcript(messages);
+  debugLog("summarize", "request", input);
+  const started = Date.now();
   const res = await ai.models.generateContent({
     model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-    contents: [{ role: "user", parts: [{ text: transcript(messages) }] }],
+    contents: [{ role: "user", parts: [{ text: input }] }],
     config: {
       systemInstruction:
         `Summarize this travel-planning chat so the assistant can continue it later. Trip: ${trip.title}` +
@@ -25,6 +29,7 @@ export async function summarizeChat(trip: Trip, messages: ChatMessage[], apiKey?
       temperature: 0.2,
     },
   });
+  debugLog("summarize", `response (${Date.now() - started} ms)`, { usage: res.usageMetadata, text: res.text });
   return res.text?.trim() || offlineSummary(trip, messages);
 }
 

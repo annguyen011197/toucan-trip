@@ -7,6 +7,7 @@ import { convertTripCosts, roundAmount } from "./currency";
 import { ToolExecutor } from "./tools";
 import { mockRespond } from "./engines/mock";
 import { offlineRevise } from "./engines/revise";
+import { parseArray } from "./engines/research";
 import { DEFAULT_PROFILE, type Trip, type TripComment } from "./types";
 
 const item = (title: string, time: string, id?: string) => ({ id, time, title, lat: 35, lng: 135, category: "sight" });
@@ -111,4 +112,27 @@ test("offline revise applies actionable comments and keeps the trip status", asy
   assert.deepEqual(tools.trip.itinerary[0].items.map((i) => i.title), ["Fushimi Inari"]);
   assert.equal(tools.trip.status, "dreaming");
   assert.match(r.text, /1 of 2/);
+});
+
+test("research: parses a JSON array wrapped in a code fence or prose", () => {
+  assert.deepEqual(parseArray('Here you go:\n```json\n[{"name":"Bún Chả Hương Liên","lat":21.01,"lng":105.85}]\n```'), [{ name: "Bún Chả Hương Liên", lat: 21.01, lng: 105.85 }]);
+  assert.deepEqual(parseArray("Sorry, I couldn't find anything."), []);
+  assert.deepEqual(parseArray("[not json]"), []);
+});
+
+test("research: real results become cards; a failing search falls back to sample data", async () => {
+  const trip: Trip = { id: "t", ownerId: "u", title: "Kyoto", destination: "Kyoto, Japan", status: "dreaming", itinerary: [], currency: "JPY", createdAt: 0, updatedAt: 0 };
+  const tools = new ToolExecutor(trip, "en");
+  tools.research = {
+    places: async () => [{ placeId: "gs-1", name: "Honke Owariya", type: "food", lat: 35.01, lng: 135.76, estCost: 1500, currency: "JPY", url: "https://maps" }],
+    hotels: async () => { throw new Error("quota"); },
+  };
+  await tools.searchPlaces({ query: "soba", near: "Kyoto" });
+  assert.equal(tools.cards[0].title, "Honke Owariya");
+  assert.equal(tools.cards[0].currency, "JPY");
+  assert.equal(tools.cards[0].isEstimate, true);
+  assert.equal(tools.cards[0].isSample, false);
+  const hotels = await tools.searchHotels({ location: "Kyoto", checkIn: "2026-11-01", checkOut: "2026-11-03", travelers: 2 });
+  assert.ok(hotels.length > 0);
+  assert.equal(tools.cards.at(-1)!.isSample, true);
 });

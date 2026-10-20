@@ -3,6 +3,7 @@ import type { ChatMessage, Trip } from "@/lib/types";
 import { summarizeChat } from "@/lib/engines/summarize";
 import { AuthError, verifyRequest } from "@/lib/server/auth";
 import { isLang, type Lang } from "@/lib/i18n";
+import { debugLog } from "@/lib/debug";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
   }
   try {
     const text = await summarizeChat(body.trip, body.messages.slice(-200), process.env.GEMINI_API_KEY, isLang(body.lang) ? body.lang : "en");
+    debugLog("compact", `${body.messages.length} messages → summary`, text);
     return NextResponse.json({ text });
   } catch (e) {
     console.error("[chat/compact]", e);

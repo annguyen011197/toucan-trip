@@ -66,6 +66,7 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
     lat: p.lat ?? 0,
     lng: p.lng ?? 0,
     note: p.note ?? "",
+    tips: p.tips?.length ? p.tips : undefined,
     category: lenientCategory(p.category),
     estCost: p.estCost ?? 0,
     imageUrl: p.imageUrl,
@@ -105,6 +106,7 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
         if (p.lat !== undefined) item.lat = p.lat;
         if (p.lng !== undefined) item.lng = p.lng;
         if (p.note !== undefined) item.note = p.note;
+        if (p.tips !== undefined) item.tips = p.tips.length ? p.tips : undefined;
         if (p.category !== undefined) item.category = lenientCategory(p.category);
         if (p.estCost !== undefined) item.estCost = p.estCost;
         if (p.imageUrl !== undefined) item.imageUrl = p.imageUrl;

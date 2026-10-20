@@ -6,6 +6,7 @@ import * as search from "./search";
 import { roundAmount } from "./currency";
 import { uid } from "./util";
 import { translator, type Lang } from "./i18n";
+import type { Researcher } from "./engines/research";
 
 /** Applies an updateTripInfo patch (pure). */
 export function applyTripInfo(trip: Trip, patch: TripInfoPatch): Trip {
@@ -44,15 +45,16 @@ export const flightCard = (f: FlightOffer): Card => ({
   price: f.price, currency: f.currency, isSample: true,
 });
 
-export const hotelCard = (h: HotelOffer): Card => ({
-  id: uid(), kind: "hotel", title: h.name, subtitle: h.area, detail: "per night", price: h.pricePerNight, currency: h.currency,
-  imageUrl: h.imageUrl, rating: h.rating, lat: h.lat, lng: h.lng, actionText: `Stay at ${h.name}`, isSample: true,
+export const hotelCard = (h: HotelOffer, real = false): Card => ({
+  id: uid(), kind: "hotel", title: h.name, subtitle: h.area, detail: h.note ?? "per night", price: h.pricePerNight, currency: h.currency,
+  imageUrl: h.imageUrl, rating: h.rating || undefined, lat: h.lat, lng: h.lng, actionText: `Stay at ${h.name}`,
+  url: h.url, isSample: !real, isEstimate: real,
 });
 
-export const placeCard = (p: PlaceResult): Card => ({
+export const placeCard = (p: PlaceResult, real = false): Card => ({
   id: uid(), kind: "place", title: p.name, subtitle: p.type.charAt(0).toUpperCase() + p.type.slice(1), detail: p.note,
-  price: p.estCost, currency: "USD", imageUrl: p.imageUrl, rating: p.rating, lat: p.lat, lng: p.lng,
-  actionText: `Add ${p.name}`, isSample: true,
+  price: p.estCost, currency: p.currency ?? "USD", imageUrl: p.imageUrl, rating: p.rating, lat: p.lat, lng: p.lng,
+  actionText: `Add ${p.name}`, url: p.url, isSample: !real, isEstimate: real,
 });
 
 /**
@@ -63,6 +65,8 @@ export class ToolExecutor {
   trip: Trip;
   cards: Card[] = [];
   itineraryChanges: string[] = [];
+  /** Real search for places/hotels; without it (offline, or when it fails) the mock data in search.ts answers. */
+  research?: Researcher;
 
   /**
    * @param lang language of the change log (the user's chat language).
@@ -98,15 +102,28 @@ export class ToolExecutor {
   }
 
   async searchHotels(q: HotelQuery, asCards = true) {
-    const r = await search.searchHotels(q);
-    if (asCards) this.cards.push(...r.slice(0, 3).map(hotelCard));
+    const real = await this.tryResearch(() => this.research!.hotels(q));
+    const r = real ?? await search.searchHotels(q);
+    if (asCards) this.cards.push(...r.slice(0, 3).map((h) => hotelCard(h, !!real)));
     return r;
   }
 
   async searchPlaces(q: PlaceQuery, asCards = true) {
-    const r = await search.searchPlaces(q);
-    if (asCards) this.cards.push(...r.slice(0, 4).map(placeCard));
+    const real = await this.tryResearch(() => this.research!.places(q));
+    const r = real ?? await search.searchPlaces(q);
+    if (asCards) this.cards.push(...r.slice(0, 4).map((p) => placeCard(p, !!real)));
     return r;
+  }
+
+  private async tryResearch<T>(run: () => Promise<T[]>): Promise<T[] | undefined> {
+    if (!this.research) return undefined;
+    try {
+      const r = await run();
+      return r.length ? r : undefined;
+    } catch (e) {
+      console.warn("[research]", e);
+      return undefined;
+    }
   }
 
   /** JSON bridge for Gemini function calls. */
@@ -138,7 +155,7 @@ export function snapshot(t: Trip) {
     travelers: t.travelers, budget: t.budget, interests: t.interests, status: t.status, hotel: t.hotel?.name,
     itinerary: t.itinerary.map((d) => ({
       day: d.day, date: d.date,
-      items: d.items.map((i) => ({ id: i.id, time: i.time, title: i.title, category: i.category, estCost: i.estCost })),
+      items: d.items.map((i) => ({ id: i.id, time: i.time, title: i.title, category: i.category, estCost: i.estCost, hasTips: !!i.tips?.length })),
     })),
   };
 }

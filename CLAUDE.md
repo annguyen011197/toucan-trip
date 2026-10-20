@@ -18,6 +18,8 @@ Tests cover only the pure/offline parts: itinerary engine, time parsing, currenc
 
 Env: copy `.env.example` → `.env.local`. Firebase and Supabase are required. `GEMINI_API_KEY` is optional; without it every AI route falls back to the rule-based offline engine.
 
+Debug AI calls with `DEBUG_AI=1 npm run dev`: `lib/debug.ts` logs each AI route's request/response and every Gemini round (system prompt, function calls, tool results, token usage) to the server console. Logs of one request share an id (`[debug:chat k3x9a]`).
+
 ## Architecture
 
 **Auth bridge (Firebase → Supabase).**
@@ -35,7 +37,8 @@ Env: copy `.env.example` → `.env.local`. Firebase and Supabase are required. `
 - `gemini.ts`: the system prompt, function declarations and `runToolLoop`, a function-calling loop that ends when the model calls a "finish" tool (`reply` for chat, `finish` for revise).
 - `mock.ts`: the offline rule-based planner (`handleEdit` parses edits like "add X at 9am on Day 2", "remove X", "move X to Day 3").
 - Also `revise.ts` (apply approved comments), `translate.ts`, `summarize.ts` (chat compaction).
-- Prices and cards come only from tool results (`lib/search.ts` is mock data, labeled SAMPLE). The model never writes prices into reply text.
+- `research.ts`: with a Gemini key, `searchPlaces` / `searchHotels` run a separate Gemini call grounded with Google Search for real places (cards labeled EST., with a Google Maps link). Flights, the offline engine and failed searches use the mock data in `lib/search.ts` (labeled SAMPLE).
+- Prices and cards come only from tool results. The model never writes prices into reply text.
 
 **Client state.**
 - `lib/app-state.tsx` (`AppProvider` / `useApp`) holds every action.

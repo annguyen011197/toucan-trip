@@ -36,9 +36,9 @@ Revise the itinerary so it reflects every approved comment:
 - Keep everything else as it is: don't reorder, retime or rewrite stops nobody commented on, except to resolve a time clash you created.
 - If comments conflict, follow the most specific one and mention the conflict.
 - Skip a comment that is only praise, a question, or impossible to act on, and list its id in skippedCommentIds.
-- New stops need realistic 24h "HH:mm" times, accurate lat/lng, address, category and estCost in ${currency} per person.
+- New stops need realistic 24h "HH:mm" times, accurate lat/lng, address, category, note, tips and estCost in ${currency} per person.
   Never invent prices; estimate typical costs only.
-- Write item titles, notes and tags in ${LANG_PROMPT_NAME[tripLang]}. Write the finish text in ${LANG_PROMPT_NAME[lang]}.
+- Write item titles, notes, tips and tags in ${LANG_PROMPT_NAME[tripLang]}. Write the finish text in ${LANG_PROMPT_NAME[lang]}.
 End by calling finish.`;
 }
 
@@ -46,7 +46,7 @@ const commentsForModel = (comments: TripComment[]) =>
   comments.map((c) => ({ id: c.id, author: c.authorName || "A friend", stop: { itemId: c.itemId, day: c.day, title: c.itemTitle }, comment: c.text }));
 
 /** Applies approved comments to `tools.trip` with Gemini. */
-export async function geminiRevise(req: ReviseRequest, tools: ToolExecutor, apiKey: string): Promise<Revision> {
+export async function geminiRevise(req: ReviseRequest, tools: ToolExecutor, apiKey: string, debugScope = "revise"): Promise<Revision> {
   const contents: Content[] = [{
     role: "user",
     parts: [{
@@ -55,7 +55,7 @@ export async function geminiRevise(req: ReviseRequest, tools: ToolExecutor, apiK
     }],
   }];
   const { finish, lastText } = await runToolLoop({
-    apiKey, contents, tools, finishName: "finish", temperature: 0.3,
+    apiKey, contents, tools, finishName: "finish", temperature: 0.3, debugScope,
     declarations: [...declarations.filter((d) => TOOLS.includes(d.name ?? "")), finishDeclaration],
     systemInstruction: revisePrompt(req.lang, req.trip.language ?? "en", req.trip.currency || "USD"),
   });

@@ -5,6 +5,7 @@ import { ToolExecutor, snapshot } from "../tools";
 import { toISODate } from "../time";
 import type { BotTurn } from "./mock";
 import { LANG_PROMPT_NAME, type Lang } from "../i18n";
+import { debugLog } from "../debug";
 
 /**
  * Gemini with function calling. Runs only on the server (API route), so GEMINI_API_KEY never reaches the browser.
@@ -24,17 +25,31 @@ Persona: warm, lightly playful (an occasional bird pun or 🐦 is fine), concise
 Follow this flow, using the [trip state] JSON to see what is already known:
 1. Ask for the destination. If the user has none, suggest 2-3 options based on vibe, season, and budget.
 2. Collect origin, dates, travelers, budget and interests — one or two questions per turn. Save each answer with updateTripInfo as soon as you get it.
-3. When destination, dates and interests are known and the itinerary is empty, generate a draft itinerary with ONE updateItinerary call (3-5 items per day, realistic 24h "HH:mm" times, accurate lat/lng, address, category, estCost in ${currency} per person), then ask what to adjust.
+3. When destination, dates and interests are known and the itinerary is empty, generate a draft itinerary with ONE updateItinerary call (3-5 items per day, realistic 24h "HH:mm" times, accurate lat/lng, address, category, note, tips, estCost in ${currency} per person), then ask what to adjust.
 4. Apply edits the user asks for (e.g. "add Kinkaku-ji at 9am on Day 2") with updateItinerary. Use itemId from the trip state for remove/move/edit.
 5. Offer flights, hotels and restaurants with searchFlights / searchHotels / searchPlaces. The app shows their results as cards automatically — don't repeat prices in your text.
+   searchPlaces / searchHotels return real places from Google Search: make "query" specific (cuisine, dish, vibe, diet, area — e.g. "authentic bún chả near Hoan Kiem" rather than "restaurant"),
+   and when adding one of them to the itinerary reuse its name, address and lat/lng exactly.
 6. When the user confirms the plan, call updateTripInfo with status "upcoming".
+7. If the user asks for tips, what to wear or what to pack, add tips to the stops that lack them (hasTips: false) with "edit" ops, then sum up the trip-wide essentials in your reply.
+
+Stop notes and tips (every stop you add or replace gets both):
+- note: one sentence on why it's worth it or what to do there (the signature dish, the best viewpoint, the must-see room).
+- tips: 2-4 short, practical, place-specific items the traveler acts on before or at the stop. Cover what applies:
+  · What to wear: dress codes (covered shoulders/knees at temples, no shoes indoors), footwear for hikes, steps or wet ground, layers for wind, AC or altitude.
+  · What to bring: cash (and whether cards work), passport/ID, water, sunscreen, hat, raincoat, swimwear, towel, bug spray, charger, a bag for shoes.
+  · Booking: reserve or buy tickets ahead, the queue to beat, closing days, last entry.
+  · Timing and conditions: the best hour to avoid crowds or heat, the weather in that season (use the trip dates), sunset times.
+  · Etiquette and safety: photo rules, tipping, bargaining, scams or pickpockets, ID checks at bars.
+- Make tips specific to this place and season ("Shoulders and knees covered — sarongs at the gate cost extra"), never generic filler like "Have fun" or "Check opening hours".
+- Each tip is one short phrase, under ~15 words, with no prices (estCost already carries the cost).
 
 Rules:
 - Never invent prices, availability, flight numbers or ratings. They may only come from tool results.
 - Dates are "yyyy-MM-dd". Times are 24h "HH:mm".
 - ALWAYS end every turn by calling \`reply\` with your message and 2-4 short quick replies (chips) whenever choices make sense.
 - Write \`reply\` text and quick replies in ${LANG_PROMPT_NAME[lang]}.
-- Write itinerary item titles, notes and tags in ${LANG_PROMPT_NAME[tripLang]} (the language of this trip's plan), and every estCost in ${currency}.
+- Write itinerary item titles, notes, tips and tags in ${LANG_PROMPT_NAME[tripLang]} (the language of this trip's plan), and every estCost in ${currency}.
 
 User profile (personalize with it):
 - Name: ${profile.name || "unknown"}
@@ -57,7 +72,8 @@ const itemSchema: Schema = {
     address: S("Street address or neighborhood of the place, e.g. \"1 Kinkakujicho, Kita Ward, Kyoto\""),
     lat: { type: Type.NUMBER },
     lng: { type: Type.NUMBER },
-    note: S("One-line tip"),
+    note: S("One sentence: why go and what to do there"),
+    tips: { type: Type.ARRAY, items: S(), description: "2-4 short practical tips: what to wear, what to bring, book ahead, best time, etiquette" },
     category: { type: Type.STRING, enum: ITEM_CATEGORIES },
     estCost: { type: Type.NUMBER, description: "Estimated cost per person, in the trip's currency" },
   },
@@ -149,7 +165,7 @@ function parseReply(args: Record<string, unknown> | undefined): BotTurn {
   return { text, quickReplies: chips.slice(0, 4) };
 }
 
-export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKey: string): Promise<BotTurn> {
+export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKey: string, debugScope = "chat"): Promise<BotTurn> {
   const contents: Content[] = req.history
     .filter((m) => m.type !== "itineraryUpdate" && m.text.trim())
     .slice(-30)
@@ -161,7 +177,7 @@ export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKe
     parts: [{ text: `[today: ${toISODate(new Date())}]\n[trip state]\n${JSON.stringify(snapshot(tools.trip))}\n\n[user]\n${req.text}` }],
   });
   const { finish, lastText } = await runToolLoop({
-    apiKey, contents, tools, declarations, finishName: "reply", temperature: 0.7,
+    apiKey, contents, tools, declarations, finishName: "reply", temperature: 0.7, debugScope,
     systemInstruction: systemPrompt(req.profile, req.lang, req.trip.language ?? "en", req.trip.currency || "USD"),
   });
   if (finish) return parseReply(finish);
@@ -174,14 +190,18 @@ export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKe
  */
 export async function runToolLoop(opts: {
   apiKey: string; systemInstruction: string; contents: Content[]; tools: ToolExecutor;
-  declarations: FunctionDeclaration[]; finishName: string; temperature: number;
+  declarations: FunctionDeclaration[]; finishName: string; temperature: number; debugScope?: string;
 }): Promise<{ finish?: Record<string, unknown>; lastText: string }> {
   const ai = new GoogleGenAI({ apiKey: opts.apiKey });
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const contents = [...opts.contents];
+  const scope = opts.debugScope ?? "gemini";
+  debugLog(scope, `system prompt (${model}, temperature ${opts.temperature})`, opts.systemInstruction);
+  debugLog(scope, "contents", opts.contents);
 
   let lastText = "";
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    const started = Date.now();
     const res = await ai.models.generateContent({
       model,
       contents,
@@ -193,6 +213,12 @@ export async function runToolLoop(opts: {
       },
     });
     const calls = res.functionCalls ?? [];
+    debugLog(scope, `round ${round + 1} response (${Date.now() - started} ms)`, {
+      finishReason: res.candidates?.[0]?.finishReason,
+      usage: res.usageMetadata,
+      functionCalls: calls.map((c) => ({ name: c.name, args: c.args })),
+      text: calls.length ? undefined : res.text,
+    });
     if (!calls.length) { lastText = res.text ?? ""; break; }
 
     const modelContent = res.candidates?.[0]?.content;
@@ -216,7 +242,9 @@ export async function runToolLoop(opts: {
       parts.push({ functionResponse: { id: call.id, name, response: output } });
     }
     if (finish) return { finish, lastText };
+    debugLog(scope, `round ${round + 1} tool results`, parts.map((p) => p.functionResponse));
     contents.push({ role: "user", parts });
   }
+  debugLog(scope, `ended without calling ${opts.finishName}`);
   return { lastText };
 }

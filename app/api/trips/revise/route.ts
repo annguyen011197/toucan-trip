@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import type { ReviseRequest, ReviseResponse } from "@/lib/types";
 import { ToolExecutor } from "@/lib/tools";
+import { geminiResearcher } from "@/lib/engines/research";
 import { geminiRevise, offlineRevise } from "@/lib/engines/revise";
 import { AuthError, verifyRequest } from "@/lib/server/auth";
 import { addPlaceImages } from "@/lib/server/place-images";
 import { isLang } from "@/lib/i18n";
+import { debugId, debugLog } from "@/lib/debug";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -34,9 +36,14 @@ export async function POST(request: Request) {
   if (!isLang(body.lang)) body.lang = "en";
 
   const apiKey = process.env.GEMINI_API_KEY;
+  const scope = `revise ${debugId()}`;
+  const started = Date.now();
+  debugLog(scope, `request (${apiKey ? "gemini" : "offline"})`, { lang: body.lang, tripId: body.trip.id, comments: body.comments.map((c) => ({ id: c.id, itemId: c.itemId, text: c.text })) });
   try {
     const tools = new ToolExecutor(body.trip, body.lang);
-    const { text, appliedIds } = apiKey ? await geminiRevise(body, tools, apiKey) : await offlineRevise(body, tools);
+    // Stop notes are written in the trip's language, so search in it too.
+    if (apiKey) tools.research = geminiResearcher(apiKey, { lang: body.trip.language ?? "en", currency: body.trip.currency || "USD", budget: body.trip.budget, debugScope: scope });
+    const { text, appliedIds } = apiKey ? await geminiRevise(body, tools, apiKey, scope) : await offlineRevise(body, tools);
     const res: ReviseResponse = {
       text,
       trip: await addPlaceImages(tools.trip),
@@ -44,6 +51,7 @@ export async function POST(request: Request) {
       appliedIds,
       engine: apiKey ? "gemini" : "offline",
     };
+    debugLog(scope, `response (${Date.now() - started} ms)`, { ...res, trip: undefined, itinerary: res.trip.itinerary });
     return NextResponse.json(res);
   } catch (e) {
     console.error("[trips/revise]", e);
