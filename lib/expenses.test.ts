@@ -42,3 +42,37 @@ test("parseAmount handles both decimal styles and grouping", () => {
   assert.equal(parseAmount("1.000,50"), 1000.5);
   assert.equal(parseAmount("abc"), undefined);
 });
+
+test("splitEqually gives every smallest unit to someone", async () => {
+  const { splitEqually } = await import("./expenses");
+  const p = [{ key: "a", name: "A" }, { key: "b", name: "B" }, { key: "c", name: "C" }];
+  assert.deepEqual(splitEqually(100_000, p, "VND").map((s) => s.amount), [33_334, 33_333, 33_333]);
+  assert.deepEqual(splitEqually(10, p, "USD").map((s) => s.amount), [3.34, 3.33, 3.33]);
+});
+
+test("balances and settle-up across payers, splits and currencies", async () => {
+  const { computeBalances, settleUp, splitEqually } = await import("./expenses");
+  const people = [{ key: "a", name: "An" }, { key: "b", name: "Bình" }, { key: "c", name: "Chi" }];
+  const balances = computeBalances([
+    // An pays 300k for everyone.
+    exp({ amount: 300_000, paidBy: people[0], split: { mode: "equal", shares: splitEqually(300_000, people, "VND") } }),
+    // Bình pays ¥600 (= 100k), only An and Bình share it.
+    exp({ amount: 600, currency: "JPY", paidBy: people[1], split: { mode: "exact", shares: [{ ...people[0], amount: 200 }, { ...people[1], amount: 400 }] } }),
+    // Chi's own coffee: no split, no debt.
+    exp({ amount: 50_000, authorId: "c", authorName: "Chi" }),
+  ], "VND", { USD: 1, VND: 25_000, JPY: 150 });
+  const net = Object.fromEntries(balances.map((b) => [b.key, Math.round(b.net)]));
+  assert.deepEqual(net, { a: 166_667, b: -66_667, c: -100_000 });
+  const transfers = settleUp(balances, "VND").map((t) => `${t.from.key}->${t.to.key}:${Math.round(t.amount)}`);
+  assert.deepEqual(transfers, ["c->a:100000", "b->a:66667"]);
+});
+
+test("guessCategory reads Vietnamese and English", async () => {
+  const { guessCategory } = await import("./expenses");
+  assert.equal(guessCategory("Grab ra sân bay", "food"), "transport");
+  assert.equal(guessCategory("Vé tàu Shinkansen", "sight"), "transport");
+  assert.equal(guessCategory("Vé vào chùa Kinkaku-ji", "other"), "sight");
+  assert.equal(guessCategory("Phở bò", "other"), "food");
+  assert.equal(guessCategory("Bia ở bar", "food"), "nightlife");
+  assert.equal(guessCategory("abc", "other"), "other");
+});

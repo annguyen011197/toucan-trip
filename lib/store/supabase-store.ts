@@ -218,6 +218,7 @@ export class SupabaseStore implements TripStore {
       : await supabase().from("trip_expenses").update({
         item_id: row.item_id, day: row.day, title: row.title, amount: row.amount, currency: row.currency,
         category: row.category, note: row.note, spent_at: row.spent_at,
+        paid_by: row.paid_by, paid_by_name: row.paid_by_name, split: row.split,
       }).eq("id", expense.id);
     if (error) { await this.loadExpenses(expense.tripId); throw new Error(error.message); }
   }
@@ -392,6 +393,7 @@ interface ExpenseRow {
   /** numeric comes back as a string. */
   amount: number | string;
   currency: string; category: TripExpense["category"]; note: string; author_id: string; author_name: string;
+  paid_by: string | null; paid_by_name: string; split: TripExpense["split"] | null;
   spent_at: string; created_at: string;
 }
 
@@ -469,6 +471,8 @@ function rowToExpense(r: ExpenseRow): TripExpense {
   return {
     id: r.id, tripId: r.trip_id, itemId: r.item_id ?? undefined, day: r.day ?? undefined, title: r.title,
     amount: Number(r.amount), currency: r.currency, category: r.category, note: r.note ?? "",
+    paidBy: r.paid_by ? { key: r.paid_by, name: r.paid_by_name } : undefined,
+    split: r.split?.shares?.length ? { ...r.split, shares: r.split.shares.map((x) => ({ ...x, amount: Number(x.amount) })) } : undefined,
     authorId: r.author_id, authorName: r.author_name, spentAt: Date.parse(r.spent_at), createdAt: Date.parse(r.created_at),
   };
 }
@@ -477,6 +481,7 @@ function expenseToRow(e: TripExpense): ExpenseRow {
   return {
     id: e.id, trip_id: e.tripId, item_id: e.itemId ?? null, day: e.day ?? null, title: e.title, amount: e.amount,
     currency: e.currency, category: e.category, note: e.note, author_id: e.authorId, author_name: e.authorName,
+    paid_by: e.paidBy?.key ?? null, paid_by_name: e.paidBy?.name ?? "", split: e.split ?? null,
     spent_at: iso(e.spentAt), created_at: iso(e.createdAt),
   };
 }

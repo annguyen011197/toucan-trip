@@ -56,6 +56,8 @@ Debug AI calls with `DEBUG_AI=1 npm run dev`: `lib/debug.ts` logs each AI route'
 - `trip_expenses` holds what was actually spent. The owner and members can add rows; authors edit their own, the owner can delete any.
 - Each row keeps the currency it was paid in. Totals are converted client-side to `Trip.currency` with `/api/rates` (falls back to `FALLBACK_USD_RATES`).
 - Itinerary `estCost` is per person, so the spent-vs-estimate bar compares against `estimate × travelers`.
+- Splitwise-style sharing: `paid_by` (+ `paid_by_name`) and `split` jsonb `{ mode: "equal" | "exact", shares: [{ key, name, amount }] }`. Keys are Firebase uids or `guest:<name>` for people without the app; share amounts are in the expense's currency and must add up to it (`splitEqually` hands leftover smallest units to the first people). Null `paid_by` = the author paid; null `split` = the payer's own expense. `computeBalances` / `settleUp` (`lib/expenses.ts`) work in the trip currency.
+- `/api/trips/expenses/categorize` (owner only) re-picks every expense's category with Gemini (`lib/engines/categorize.ts`, keyword fallback `guessCategory`). It writes with the service role because members' rows are only updatable by their authors.
 
 **i18n.**
 - `lib/i18n.ts` holds the `en` dictionary, which defines `MessageKey`, and a `vi: Record<MessageKey, string>`. Adding a key to `en` without adding it to `vi` fails the typecheck.

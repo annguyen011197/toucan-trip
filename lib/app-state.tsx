@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ChatMessage, ChatResponse, CommentStatus, ItineraryItem, ItineraryOp, ReviseResponse, Trip, TripComment, TripExpense, TripMember, TripStatus, UserProfile } from "./types";
+import type { CategorizeResponse, ChatMessage, ChatResponse, CommentStatus, ItineraryItem, ItineraryOp, ReviseResponse, Trip, TripComment, TripExpense, TripMember, TripStatus, UserProfile } from "./types";
 import { DEFAULT_PROFILE } from "./types";
 import type { TripStore } from "./store/types";
 import { SupabaseStore } from "./store/supabase-store";
@@ -81,6 +81,8 @@ interface AppContextValue {
   /** Adds (no `id`) or edits an expense; the author is the signed-in user. */
   saveExpense: (trip: Trip, expense: ExpenseInput) => Promise<void>;
   deleteExpense: (expense: TripExpense) => Promise<void>;
+  /** Owner: AI re-picks the category of every expense on the trip (server-side, all authors). */
+  recategorizeExpenses: (trip: Trip) => Promise<CategorizeResponse>;
   listMembers: (trip: Trip) => Promise<TripMember[]>;
   inviteMember: (trip: Trip, email: string) => Promise<{ member: TripMember; existing: boolean }>;
   removeMember: (member: TripMember) => Promise<void>;
@@ -338,13 +340,28 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
 
   const saveExpense = useCallback(async (trip: Trip, input: ExpenseInput) => {
     const isNew = !input.id;
+    const authorName = profile.name || user?.displayName || user?.email?.split("@")[0] || "";
+    // The form shows "You" for the signed-in user; store the real name so everyone else sees who it was.
+    const named = <T extends { key: string; name: string }>(p: T): T => (p.key === userId ? { ...p, name: authorName } : p);
     await store().saveExpense({
-      ...input, id: input.id ?? uid(), tripId: trip.id, authorId: userId, createdAt: input.createdAt ?? Date.now(),
-      authorName: profile.name || user?.displayName || user?.email?.split("@")[0] || "",
+      ...input, id: input.id ?? uid(), tripId: trip.id, authorId: userId, createdAt: input.createdAt ?? Date.now(), authorName,
+      paidBy: input.paidBy && named(input.paidBy),
+      split: input.split && { ...input.split, shares: input.split.shares.map(named) },
     }, isNew);
   }, [userId, profile.name, user]);
 
   const deleteExpense = useCallback((expense: TripExpense) => store().deleteExpense(expense), []);
+
+  const recategorizeExpenses = useCallback(async (trip: Trip) => {
+    const res = await fetch("/api/trips/expenses/categorize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+      body: JSON.stringify({ tripId: trip.id }),
+    });
+    const data = (await res.json().catch(() => ({}))) as CategorizeResponse & { error?: string };
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }, [idToken]);
 
   const listMembers = useCallback((trip: Trip) => store().listMembers(trip.id), []);
 
@@ -378,9 +395,9 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     ready, engine, uid: userId, trips, profile, currency, tab, setTab,
     selectedTrip: trips.find((tr) => tr.id === selectedId),
     selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, listMembers, inviteMember, removeMember, getShareLink, resetShareLink,
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, listMembers, inviteMember, removeMember, getShareLink, resetShareLink,
   }), [ready, engine, userId, trips, profile, currency, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, listMembers, inviteMember, removeMember, getShareLink, resetShareLink]);
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, listMembers, inviteMember, removeMember, getShareLink, resetShareLink]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

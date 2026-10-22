@@ -103,6 +103,16 @@ export interface TripComment {
 
 // ───────────── Expenses ─────────────
 
+/** Someone an expense is paid by or split with: a user (Firebase uid) or a guest without an account ("guest:<name>"). */
+export interface ExpensePerson { key: string; name: string }
+
+/** How an expense is shared. Share amounts are in the expense's currency and add up to its amount. */
+export interface ExpenseSplit {
+  /** equal: amount ÷ the listed people; exact: amounts typed per person. */
+  mode: "equal" | "exact";
+  shares: (ExpensePerson & { amount: number })[];
+}
+
 /** Money actually spent on the trip, logged by the owner or a member. */
 export interface TripExpense {
   id: string;
@@ -117,6 +127,10 @@ export interface TripExpense {
   currency: string;
   category: ItemCategory;
   note: string;
+  /** Who paid; unset on older rows = the author. */
+  paidBy?: ExpensePerson;
+  /** Unset = the payer's own expense, nobody owes anything. */
+  split?: ExpenseSplit;
   authorId: string;
   authorName: string;
   spentAt: number;
@@ -289,5 +303,13 @@ export interface ReviseResponse {
   itineraryChanges: string[];
   /** Comments the planner could act on; the rest stay approved. */
   appliedIds: string[];
+  engine: "gemini" | "offline";
+}
+
+/** /api/trips/expenses/categorize contract (owner re-categorizes every expense with AI). */
+export interface CategorizeResponse {
+  /** Expenses whose category changed. */
+  changed: { id: string; title: string; from: ItemCategory; to: ItemCategory }[];
+  total: number;
   engine: "gemini" | "offline";
 }
