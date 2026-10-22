@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Camera, Check, ChevronRight, Footprints, Languages, ImagePlus, GripVertical, Lightbulb, Map as MapIcon, MapPin, MessageCircle, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, UserPlus, Users, WandSparkles, X } from "lucide-react";
+import { ArrowLeft, Ban, Camera, Check, ChevronRight, Pencil, Plus, Footprints, Languages, ImagePlus, GripVertical, Lightbulb, Map as MapIcon, MapPin, MessageCircle, MoreVertical, Share2, SquareArrowOutUpRight, TramFront, UserPlus, Users, WandSparkles } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -22,6 +22,7 @@ import { ShareSheet } from "./ShareSheet";
 import { ReviewSheet, StopComments, useTripComments } from "./Comments";
 import { ExpenseSummaryCard, ExpensesSheet, StopExpenseButton, ownerNameFrom, useExpenseSummary, useTripExpenses, type ExpenseDraft } from "./Expenses";
 import { TravelersCard, TravelersSheet, travelerCount, useTripTravelers } from "./Travelers";
+import { StopEditor, isToday } from "./StopEditor";
 import { expenseDraftFor } from "@/lib/expenses";
 
 const DISMISSED_KEY = "toucan-trip:convert-dismissed";
@@ -46,10 +47,11 @@ export function ItineraryView({ trip }: { trip: Trip }) {
   const groupSize = travelers.length ? travelerCount(trip, travelers) : trip.travelers ?? 1;
   const ownerName = owner ? profile.name || t("share.you") : ownerNameFrom(trip, expenses) || t("expense.owner");
   const [sheet, setSheet] = useState<{ kind: "share" } | { kind: "review" } | { kind: "comments"; item: ItineraryItem; day: number }
-    | { kind: "expenses"; draft?: ExpenseDraft } | { kind: "travelers" }>();
+    | { kind: "expenses"; draft?: ExpenseDraft } | { kind: "travelers" } | { kind: "stop"; day: number; item?: ItineraryItem }>();
   const toReview = comments.filter((c) => c.status === "open").length;
   const approved = comments.filter((c) => c.status === "approved").length;
-  const [selectedDay, setSelectedDay] = useState(1);
+  // On the road, open on today's plan.
+  const [selectedDay, setSelectedDay] = useState(() => trip.itinerary.find((d) => isToday(trip, d.day))?.day ?? 1);
   const [menu, setMenu] = useState(false);
   const day = trip.itinerary.find((d) => d.day === selectedDay);
   const city = findCity(trip.destination);
@@ -87,7 +89,11 @@ export function ItineraryView({ trip }: { trip: Trip }) {
 
   const place = trip.destination ?? trip.title;
 
-  const remove = (item: ItineraryItem) => applyItinerary(trip, [{ action: "remove", day: selectedDay, itemId: item.id }]);
+  const toggleDone = (item: ItineraryItem) =>
+    applyItinerary(trip, [{ action: "edit", day: selectedDay, itemId: item.id, item: { status: item.status === "done" ? null : "done" } }]);
+  const today = isToday(trip, selectedDay);
+  // Today: the first stop not yet visited or skipped is "next".
+  const nextId = today ? day?.items.find((i) => !i.status)?.id : undefined;
 
   return (
     <div className="min-h-dvh bg-white">
@@ -177,7 +183,7 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                 <button key={d.day} onClick={() => setSelectedDay(d.day)} aria-pressed={d.day === selectedDay}
                   className={cn("flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-2xl transition",
                     d.day === selectedDay ? "bg-primary text-white shadow-[0_6px_14px_rgb(26_127_232/0.35)]" : "bg-surface text-ink-2")}>
-                  <span className="text-[10px] font-semibold tracking-widest">{t("itin.day")}</span>
+                  <span className="text-[10px] font-semibold tracking-widest">{isToday(trip, d.day) ? t("stop.today").toUpperCase() : t("itin.day")}</span>
                   <span className="text-xl font-bold">{String(d.day).padStart(2, "0")}</span>
                 </button>
               ))}
@@ -200,7 +206,8 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                     {day.items.map((item, idx) => (
                       <TimelineRow key={item.id} item={item} first={idx === 0} last={idx === day.items.length - 1}
                         next={day.items[idx + 1]} destination={trip.destination} currency={trip.currency} editable={owner}
-                        comments={comments.filter((c) => c.itemId === item.id)} onRemove={() => remove(item)}
+                        comments={comments.filter((c) => c.itemId === item.id)} isNext={item.id === nextId}
+                        onEdit={() => setSheet({ kind: "stop", day: day.day, item })} onToggleDone={() => toggleDone(item)}
                         onImage={() => setPicker({ kind: "stop", item })} onComments={() => setSheet({ kind: "comments", item, day: day.day })}
                         spent={spent.byItem[item.id]} onExpense={() => setSheet({ kind: "expenses", draft: expenseDraftFor(item, day.day, trip.currency) })} />
                     ))}
@@ -208,6 +215,12 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                 </DndContext>
               ) : (
                 <p className="py-6 text-sm text-ink-2">{t("itin.nothingToday")}</p>
+              )}
+              {owner && (
+                <button onClick={() => setSheet({ kind: "stop", day: selectedDay })}
+                  className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-primary/40 py-3 text-sm font-semibold text-primary">
+                  <Plus className="h-4 w-4" /> {t("stop.addButton")}
+                </button>
               )}
             </div>
 
@@ -259,6 +272,7 @@ export function ItineraryView({ trip }: { trip: Trip }) {
       {sheet?.kind === "expenses" && (
         <ExpensesSheet trip={trip} expenses={expenses} travelers={travelers} summary={spent} draft={sheet.draft} onClose={() => setSheet(undefined)} />
       )}
+      {sheet?.kind === "stop" && <StopEditor trip={trip} day={sheet.day} item={sheet.item} onClose={() => setSheet(undefined)} />}
       {sheet?.kind === "travelers" && (
         <TravelersSheet trip={trip} travelers={travelers} ownerName={ownerName} onClose={() => setSheet(undefined)} />
       )}
@@ -279,14 +293,16 @@ export function ItineraryView({ trip }: { trip: Trip }) {
   );
 }
 
-function TimelineRow({ item, first, last, next, destination, currency, editable, comments, spent, onRemove, onImage, onComments, onExpense }: {
+function TimelineRow({ item, first, last, next, destination, currency, editable, comments, spent, isNext, onEdit, onToggleDone, onImage, onComments, onExpense }: {
   item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; destination?: string; currency: string;
   /** Owner: drag, photo and remove controls. */
   editable: boolean;
   comments: TripComment[];
   /** Actually spent at this stop, in the trip currency. */
   spent?: number;
-  onRemove: () => void; onImage: () => void; onComments: () => void; onExpense: () => void;
+  /** Today's next stop on the road. */
+  isNext?: boolean;
+  onEdit: () => void; onToggleDone: () => void; onImage: () => void; onComments: () => void; onExpense: () => void;
 }) {
   const { t, lang } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: !editable });
@@ -297,12 +313,21 @@ function TimelineRow({ item, first, last, next, destination, currency, editable,
       className={cn("group relative flex gap-3.5 bg-white", isDragging && "z-10 rounded-2xl shadow-card")}>
       {/* Rail */}
       <div className="flex w-[18px] shrink-0 flex-col items-center">
-        <span className={cn("mt-1 h-3.5 w-3.5 rounded-full", first ? "bg-primary ring-[5px] ring-primary/25" : "bg-[#CBD5E1]")} />
+        {editable ? (
+          // The rail dot doubles as a "visited" checkbox, one tap on the road.
+          <button aria-label={t("stop.toggleDone", { title: item.title })} aria-pressed={item.status === "done"} onPointerDown={(e) => e.stopPropagation()} onClick={onToggleDone}
+            className={cn("-m-1.5 mt-[-2px] flex h-[26px] w-[26px] items-center justify-center rounded-full")}>
+            <StatusDot item={item} highlight={isNext || (first && !item.status)} />
+          </button>
+        ) : <span className="mt-1"><StatusDot item={item} highlight={isNext || (first && !item.status)} /></span>}
         <span className={cn("w-0.5 flex-1", last ? "bg-transparent" : "bg-line")} />
       </div>
       <div className={cn("min-w-0 flex-1", last ? "pb-4" : "pb-6")} {...attributes} {...listeners} style={{ touchAction: "manipulation" }}>
         <div className="flex items-center gap-2">
-          <span className={cn("text-xs font-semibold", first ? "text-primary" : "text-muted")}>{displayTime(item.time, lang)}</span>
+          <span className={cn("text-xs font-semibold", (isNext || (first && !item.status)) ? "text-primary" : "text-muted")}>{displayTime(item.time, lang)}</span>
+          {isNext && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase">{t("stop.next")}</span>}
+          {item.status && <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase", item.status === "done" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+            {t(item.status === "done" ? "stop.statusDone" : "stop.statusSkipped")}</span>}
           {editable && <GripVertical className="h-3.5 w-3.5 text-muted/60" />}
           <span className="flex-1" />
           {item.estCost > 0 && <span className="text-xs font-medium text-ink-2">{money(item.estCost, currency, lang)}</span>}
@@ -318,14 +343,14 @@ function TimelineRow({ item, first, last, next, destination, currency, editable,
                 className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
                 <ImagePlus className="h-3.5 w-3.5" />
               </button>
-              <button aria-label={t("itin.remove", { title: item.title })} onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}
+              <button aria-label={t("stop.edit", { title: item.title })} onPointerDown={(e) => e.stopPropagation()} onClick={onEdit}
                 className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink">
-                <X className="h-3.5 w-3.5" />
+                <Pencil className="h-3.5 w-3.5" />
               </button>
             </>
           )}
         </div>
-        <div className="mt-1 text-base font-semibold">{item.title}</div>
+        <div className={cn("mt-1 text-base font-semibold", item.status === "skipped" && "text-muted line-through", item.status === "done" && "text-ink-2")}>{item.title}</div>
         <a href={googleMapsUrl(item, destination)} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => e.stopPropagation()}
           className="mt-1 flex w-fit max-w-full items-start gap-1 text-[13px] font-medium text-primary hover:underline">
           <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -361,4 +386,10 @@ function TimelineRow({ item, first, last, next, destination, currency, editable,
       </div>
     </div>
   );
+}
+
+function StatusDot({ item, highlight }: { item: ItineraryItem; highlight?: boolean }) {
+  if (item.status === "done") return <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-emerald-500 text-white"><Check className="h-3 w-3" strokeWidth={3} /></span>;
+  if (item.status === "skipped") return <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-slate-200 text-slate-500"><Ban className="h-3 w-3" /></span>;
+  return <span className={cn("block h-3.5 w-3.5 rounded-full", highlight ? "bg-primary ring-[5px] ring-primary/25" : "bg-[#CBD5E1]")} />;
 }

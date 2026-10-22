@@ -116,8 +116,13 @@ export function applyOps(ops: ItineraryOp[], itinerary: ItineraryDay[], startDat
           item.imageUrl = item.imageCredit = item.imageSearched = undefined;
         }
         if (p.tags !== undefined) item.tags = p.tags;
+        const oldStatus = item.status;
+        if (p.status !== undefined) item.status = p.status ?? undefined;
         insertSorted(item, loc.d.day);
-        changes.push(item.time !== oldTime
+        // A status flip is its own entry, so "Marked X done" isn't reported as a generic update.
+        if (item.status !== oldStatus) changes.push(t(item.status === "done" ? "change.done" : item.status === "skipped" ? "change.skipped" : "change.reopened", { title: item.title, day: loc.d.day }));
+        const fieldsChanged = Object.keys(p).some((k) => k !== "status" && k !== "id");
+        if (fieldsChanged || item.status === oldStatus) changes.push(item.time !== oldTime
           ? t("change.movedTime", { title: item.title, time: time(item.time), day: loc.d.day })
           : t("change.updated", { title: item.title, day: loc.d.day }));
         break;
@@ -175,4 +180,5 @@ export function travelLeg(a: ItineraryItem, b: ItineraryItem): { minutes: number
   return { minutes: Math.max(8, Math.round((km / 22) * 60) + 6), mode: "transit" };
 }
 
-export const dayCost = (d?: ItineraryDay) => (d ? d.items.reduce((s, i) => s + (i.estCost || 0), 0) : 0);
+/** Skipped stops won't be paid for, so they leave the estimate. */
+export const dayCost = (d?: ItineraryDay) => (d ? d.items.reduce((s, i) => s + (i.status === "skipped" ? 0 : i.estCost || 0), 0) : 0);

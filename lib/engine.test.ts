@@ -136,3 +136,14 @@ test("research: real results become cards; a failing search falls back to sample
   assert.ok(hotels.length > 0);
   assert.equal(tools.cards.at(-1)!.isSample, true);
 });
+
+test("edit sets and clears a stop's status with its own change entry", () => {
+  const start = applyOps([{ action: "add", day: 1, item: item("Bảo tàng", "16:30", "m") }], []).itinerary;
+  const done = applyOps([{ action: "edit", day: 1, itemId: "m", item: { status: "done" } }], start, undefined, "vi");
+  assert.equal(done.itinerary[0].items[0].status, "done");
+  assert.deepEqual(done.changes, ["Đã đi Bảo tàng · Ngày 1"]);
+  const back = applyOps([{ action: "edit", day: 1, itemId: "m", item: { status: null } }], done.itinerary);
+  assert.equal(back.itinerary[0].items[0].status, undefined);
+  const both = applyOps([{ action: "edit", day: 1, itemId: "m", item: { status: "skipped", time: "18:00" } }], start);
+  assert.equal(both.changes.length, 2);
+});

@@ -6,6 +6,9 @@ export const TRIP_STATUSES: TripStatus[] = ["dreaming", "upcoming", "ongoing", "
 export type ItemCategory = "food" | "sight" | "activity" | "transport" | "hotel" | "shopping" | "nightlife" | "other";
 export const ITEM_CATEGORIES: ItemCategory[] = ["food", "sight", "activity", "transport", "hotel", "shopping", "nightlife", "other"];
 
+/** On the road: visited, or dropped without deleting it (it stays visible, struck through). */
+export type ItemStatus = "done" | "skipped";
+
 export interface ItineraryItem {
   id: string;
   /** 24h "HH:mm" */
@@ -27,6 +30,7 @@ export interface ItineraryItem {
   /** A photo lookup already ran for this stop (hit or miss), so it isn't repeated. */
   imageSearched?: boolean;
   tags?: string[];
+  status?: ItemStatus;
 }
 
 export interface ItineraryDay {
@@ -233,6 +237,8 @@ export interface ItineraryItemPatch {
   estCost?: number;
   imageUrl?: string;
   tags?: string[];
+  /** null reopens a done/skipped stop. */
+  status?: ItemStatus | null;
 }
 
 export interface ItineraryOp {

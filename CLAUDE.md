@@ -45,6 +45,8 @@ Debug AI calls with `DEBUG_AI=1 npm run dev`: `lib/debug.ts` logs each AI route'
 - `lib/store/supabase-store.ts` implements `TripStore`. Writes update a local cache first (optimistic), then Supabase. Realtime keeps other tabs and devices in sync.
 - Under RLS, Realtime DELETE events can't be filtered and carry only the primary key. The store handles that by dropping rows by id.
 
+**Manual stop edits (`components/StopEditor.tsx`).** The owner edits, adds, deletes and reschedules stops by hand, no AI. Quick actions for trips in progress: mark visited / skip (`ItineraryItem.status`, `null` reopens), push later, move to the next day. Everything is ordinary `applyOps` ops, so it lands in the chat change log. Skipped stops stay visible (struck through) and drop out of `dayCost`; Gemini is told to leave done/skipped stops alone. Stops added by hand have no lat/lng (map skips them; the Maps link uses name + address).
+
 **Sharing (`supabase/migrations/*_sharing.sql`).**
 - Roles: the trip owner, and members with the `commenter` role (`trip_members`). Members can read the trip and comment on stops (`trip_comments`, keyed by `ItineraryItem.id`). They can't edit the trip or see its chat (`messages` is owner-only).
 - Policies use the SECURITY DEFINER helpers `is_trip_owner` / `is_trip_member` so the policies on `trips` and `trip_members` don't recurse into each other.

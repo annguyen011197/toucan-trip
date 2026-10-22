@@ -47,6 +47,7 @@ Stop notes and tips (every stop you add or replace gets both):
 Rules:
 - Never invent prices, availability, flight numbers or ratings. They may only come from tool results.
 - Dates are "yyyy-MM-dd". Times are 24h "HH:mm".
+- Itinerary items may have status "done" (already visited) or "skipped" (dropped during the trip). Keep them as they are; don't re-add, move or re-suggest them unless the user asks.
 - ALWAYS end every turn by calling \`reply\` with your message and 2-4 short quick replies (chips) whenever choices make sense.
 - Write \`reply\` text and quick replies in ${LANG_PROMPT_NAME[lang]}.
 - Write itinerary item titles, notes, tips and tags in ${LANG_PROMPT_NAME[tripLang]} (the language of this trip's plan), and every estCost in ${currency}.

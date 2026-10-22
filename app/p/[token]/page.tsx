@@ -118,7 +118,9 @@ function PublicTripView({ data, rates }: { data: PublicTrip; rates: Record<strin
                   <span className="w-12 shrink-0 pt-0.5 text-xs font-semibold text-primary">{displayTime(i.time, lang)}</span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start gap-2">
-                      <h3 className="min-w-0 flex-1 font-semibold">{i.title}</h3>
+                      <h3 className={i.status === "skipped" ? "min-w-0 flex-1 font-semibold text-muted line-through" : "min-w-0 flex-1 font-semibold"}>
+                        {i.status === "done" && <span className="mr-1 text-emerald-600">✓</span>}{i.title}
+                      </h3>
                       {i.estCost > 0 && <span className="shrink-0 text-xs text-ink-2">{money(i.estCost, cur, lang)}</span>}
                     </div>
                     {hasSpending && spent.byItem[i.id] ? <div className="text-xs font-semibold text-emerald-700">{t("public.spentShort", { amount: money(spent.byItem[i.id], cur, lang) })}</div> : null}
