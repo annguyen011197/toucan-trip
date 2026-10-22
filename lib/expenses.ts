@@ -163,3 +163,23 @@ export function guessCategory(text: string, current: ItemCategory): ItemCategory
 }
 
 export const isItemCategory = (v: unknown): v is ItemCategory => typeof v === "string" && (ITEM_CATEGORIES as string[]).includes(v);
+
+/**
+ * Moves everything `from` paid or owes in one expense to `to` (a virtual traveler linked to a real member).
+ * Shares merge if `to` already had one. Returns undefined when the expense doesn't involve `from`.
+ */
+export function rekeyExpense(e: { paidBy?: ExpensePerson; split?: ExpenseSplit }, from: string, to: ExpensePerson) {
+  const paidBy = e.paidBy?.key === from ? to : e.paidBy;
+  let split = e.split;
+  if (split?.shares.some((s) => s.key === from)) {
+    const shares: ExpenseSplit["shares"] = [];
+    for (const s of split.shares) {
+      const next = s.key === from ? { ...to, amount: s.amount } : s;
+      const same = shares.find((x) => x.key === next.key);
+      if (same) same.amount = Math.round((same.amount + next.amount) * 100) / 100;
+      else shares.push({ ...next });
+    }
+    split = { ...split, shares };
+  }
+  return paidBy === e.paidBy && split === e.split ? undefined : { paidBy, split };
+}

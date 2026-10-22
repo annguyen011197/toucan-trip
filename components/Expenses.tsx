@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowRight, ChevronRight, Loader2, Plus, Trash2, UserPlus, Wallet, WandSparkles } from "lucide-react";
 import { useApp, type ExpenseInput } from "@/lib/app-state";
-import { ITEM_CATEGORIES, type ExpensePerson, type ExpenseSplit, type ItemCategory, type ItineraryItem, type Trip, type TripExpense } from "@/lib/types";
+import { ITEM_CATEGORIES, type ExpensePerson, type ExpenseSplit, type ItemCategory, type ItineraryItem, type Trip, type TripExpense, type TripTraveler, travelerKey } from "@/lib/types";
 import { CURRENCIES, FALLBACK_USD_RATES, money } from "@/lib/currency";
 import { computeBalances, estimatedTotal, guestKey, isGuest, parseAmount, payerOf, settleUp, splitEqually, splitRemainder, summarizeExpenses, type ExpenseSummary, type UsdRates } from "@/lib/expenses";
 import { useI18n } from "@/lib/i18n-react";
@@ -39,7 +39,7 @@ export function useExpenseSummary(trip: Trip, expenses: TripExpense[]) {
 }
 
 /** Everyone money can be paid by or split with: you, the owner, joined members and guests already used on this trip. */
-function useTripPeople(trip: Trip, expenses: TripExpense[]): ExpensePerson[] {
+function useTripPeople(trip: Trip, expenses: TripExpense[], travelers: TripTraveler[]): { people: ExpensePerson[]; going: string[] } {
   const { uid, profile, listMembers, isOwner } = useApp();
   const { t } = useI18n();
   const [members, setMembers] = useState<ExpensePerson[]>([]);
@@ -53,15 +53,22 @@ function useTripPeople(trip: Trip, expenses: TripExpense[]): ExpensePerson[] {
     const seen = new Map<string, ExpensePerson>();
     const add = (p: ExpensePerson) => { if (!seen.has(p.key) || (!seen.get(p.key)!.name && p.name)) seen.set(p.key, p); };
     add({ key: uid, name: profile.name || t("share.you") });
-    // Members can't read the owner's profile; the name they used on expenses is the best we have.
-    if (!isOwner(trip)) {
-      const named = expenses.flatMap((e) => [{ key: e.authorId, name: e.authorName }, payerOf(e), ...(e.split?.shares ?? [])]).find((p) => p.key === trip.ownerId && p.name);
-      add({ key: trip.ownerId, name: named?.name || t("expense.owner") });
-    }
+    if (!isOwner(trip)) add({ key: trip.ownerId, name: ownerNameFrom(trip, expenses) || t("expense.owner") });
+    // Who's going first, then members who only follow the trip, then anyone already used on an expense.
+    const going = [trip.ownerId, ...travelers.map(travelerKey)];
+    travelers.forEach((tr) => add({ key: travelerKey(tr), name: tr.name }));
     members.forEach(add);
-    for (const e of expenses) for (const p of [payerOf(e), ...(e.split?.shares ?? [])]) if (isGuest(p.key)) add({ key: p.key, name: p.name });
-    return [...seen.values()];
-  }, [uid, profile.name, trip, members, expenses, isOwner, t]);
+    for (const e of expenses) for (const p of [payerOf(e), ...(e.split?.shares ?? [])]) if (isGuest(p.key) || p.key.startsWith("traveler:")) add({ key: p.key, name: p.name });
+    const people = [...seen.values()];
+    // Without a travelers list, everyone counts as going (how splits worked before the list existed).
+    return { people, going: travelers.length ? going : people.map((p) => p.key) };
+  }, [uid, profile.name, trip, members, expenses, travelers, isOwner, t]);
+}
+
+/** Members can't read the owner's profile; the name used on expenses is the best there is. */
+export function ownerNameFrom(trip: Trip, expenses: TripExpense[]): string | undefined {
+  return expenses.flatMap((e) => [{ key: e.authorId, name: e.authorName }, payerOf(e), ...(e.split?.shares ?? [])])
+    .find((p) => p.key === trip.ownerId && p.name)?.name;
 }
 
 /** "You" for the signed-in user, else the stored name. */
@@ -72,12 +79,17 @@ function useDisplayName() {
 }
 
 /** Itinerary estimates are per person, expenses are what the group paid. */
-const groupEstimate = (trip: Trip) => estimatedTotal(trip) * Math.max(1, trip.travelers ?? 1);
+const groupEstimate = (trip: Trip, groupSize: number) => estimatedTotal(trip) * Math.max(1, groupSize);
 
 /** Spent vs. estimate, under the itinerary's cost card. */
-export function ExpenseSummaryCard({ trip, summary, count, onOpen }: { trip: Trip; summary: ExpenseSummary; count: number; onOpen: () => void }) {
+export function ExpenseSummaryCard({ trip, summary, count, groupSize, onOpen }: {
+  trip: Trip; summary: ExpenseSummary; count: number;
+  /** Travelers list size, else the trip's traveler count. */
+  groupSize: number;
+  onOpen: () => void;
+}) {
   const { t, lang } = useI18n();
-  const est = groupEstimate(trip);
+  const est = groupEstimate(trip, groupSize);
   const pct = est > 0 ? Math.round((summary.total / est) * 100) : undefined;
   const over = est > 0 && summary.total > est;
   return (
@@ -98,7 +110,7 @@ export function ExpenseSummaryCard({ trip, summary, count, onOpen }: { trip: Tri
             <div className={cn("h-full rounded-full", over ? "bg-red-500" : "bg-emerald-500")} style={{ width: `${Math.min(100, pct ?? 0)}%` }} />
           </div>
           <div className="mt-1.5 flex justify-between text-xs text-ink-2">
-            <span>{t((trip.travelers ?? 1) > 1 ? "expense.estFor" : "expense.est", { amount: money(est, trip.currency, lang), n: trip.travelers ?? 1 })}</span>
+            <span>{t(groupSize > 1 ? "expense.estFor" : "expense.est", { amount: money(est, trip.currency, lang), n: groupSize })}</span>
             <span className={cn("font-semibold", over ? "text-red-600" : "text-emerald-700")}>
               {t(over ? "expense.over" : "expense.left", { amount: money(Math.abs(est - summary.total), trip.currency, lang) })}
             </span>
@@ -112,12 +124,12 @@ export function ExpenseSummaryCard({ trip, summary, count, onOpen }: { trip: Tri
 export type ExpenseDraft = Partial<ExpenseInput>;
 
 /** All expenses with breakdowns, plus the add/edit form. Opens straight on the form when given a `draft`. */
-export function ExpensesSheet({ trip, expenses, summary, draft, onClose }: {
-  trip: Trip; expenses: TripExpense[]; summary: ExpenseSummary; draft?: ExpenseDraft; onClose: () => void;
+export function ExpensesSheet({ trip, expenses, travelers, summary, draft, onClose }: {
+  trip: Trip; expenses: TripExpense[]; travelers: TripTraveler[]; summary: ExpenseSummary; draft?: ExpenseDraft; onClose: () => void;
 }) {
   const { t, lang } = useI18n();
   const { uid, isOwner, recategorizeExpenses } = useApp();
-  const people = useTripPeople(trip, expenses);
+  const { people, going } = useTripPeople(trip, expenses, travelers);
   const nameOf = useDisplayName();
   const rates = useUsdRates();
   const [editing, setEditing] = useState<ExpenseDraft | undefined>(draft);
@@ -130,7 +142,7 @@ export function ExpensesSheet({ trip, expenses, summary, draft, onClose }: {
   const shared = expenses.some((e) => e.split?.shares.some((s) => s.key !== payerOf(e).key));
 
   if (editing) {
-    return <ExpenseForm trip={trip} draft={editing} people={people} onBusy={setBusy} busy={busy}
+    return <ExpenseForm trip={trip} draft={editing} people={people} going={going} onBusy={setBusy} busy={busy}
       onDone={() => (draft ? onClose() : setEditing(undefined))} onClose={onClose} />;
   }
 
@@ -279,8 +291,11 @@ const LAST_CURRENCY_KEY = "toucan-trip:expense-currency:";
 
 type SplitMode = "none" | ExpenseSplit["mode"];
 
-function ExpenseForm({ trip, draft, people: tripPeople, busy, onBusy, onDone, onClose }: {
-  trip: Trip; draft: ExpenseDraft; people: ExpensePerson[]; busy: boolean; onBusy: (b: boolean) => void; onDone: () => void; onClose: () => void;
+function ExpenseForm({ trip, draft, people: tripPeople, going, busy, onBusy, onDone, onClose }: {
+  trip: Trip; draft: ExpenseDraft; people: ExpensePerson[];
+  /** Default people to split with: who's going. */
+  going: string[];
+  busy: boolean; onBusy: (b: boolean) => void; onDone: () => void; onClose: () => void;
 }) {
   const { t, lang } = useI18n();
   const { saveExpense, uid } = useApp();
@@ -308,12 +323,12 @@ function ExpenseForm({ trip, draft, people: tripPeople, busy, onBusy, onDone, on
   // A new expense is split with everyone once there's more than one person; a solo trip doesn't need it.
   const [mode, setMode] = useState<SplitMode | undefined>(isNew ? undefined : draft.split?.mode ?? "none");
   const splitMode: SplitMode = mode ?? (people.length > 1 ? "equal" : "none");
-  // undefined = everyone (people may still be loading when the form opens).
+  // undefined = everyone going (the lists may still be loading when the form opens).
   const [chosen, setChosen] = useState<string[] | undefined>(draft.split?.mode === "equal" ? draft.split.shares.map((s) => s.key) : undefined);
   const [exact, setExact] = useState<Record<string, string>>(() =>
     Object.fromEntries((draft.split?.mode === "exact" ? draft.split.shares : []).map((s) => [s.key, String(s.amount)])));
   const [guestName, setGuestName] = useState<string>();
-  const chosenPeople = people.filter((p) => (chosen ?? people.map((x) => x.key)).includes(p.key));
+  const chosenPeople = people.filter((p) => (chosen ?? going).includes(p.key));
   const value = parseAmount(amount);
   const exactShares = people.map((p) => ({ ...p, amount: parseAmount(exact[p.key] ?? "") ?? 0 })).filter((s) => s.amount > 0);
   const left = value ? splitRemainder(value, exactShares, currency) : 0;
@@ -323,7 +338,7 @@ function ExpenseForm({ trip, draft, people: tripPeople, busy, onBusy, onDone, on
     if (!name) return setGuestName(undefined);
     const p = { key: guestKey(name), name };
     if (!people.some((x) => x.key === p.key)) setExtra((list) => [...list, p]);
-    if (chosen) setChosen([...chosen, p.key]);
+    setChosen([...(chosen ?? going), p.key]);
     setGuestName(undefined);
   };
   const [error, setError] = useState<string>();
@@ -459,7 +474,7 @@ function ExpenseForm({ trip, draft, people: tripPeople, busy, onBusy, onDone, on
                     {splitMode === "equal" ? (
                       <label className="flex min-w-0 flex-1 items-center gap-2.5 py-1">
                         <input type="checkbox" checked={on} className="h-4 w-4 accent-[var(--color-primary)]"
-                          onChange={() => setChosen((c) => { const cur = c ?? people.map((x) => x.key); return on ? cur.filter((k) => k !== p.key) : [...cur, p.key]; })} />
+                          onChange={() => setChosen((c) => { const cur = c ?? going; return on ? cur.filter((k) => k !== p.key) : [...cur, p.key]; })} />
                         <span className="min-w-0 flex-1 truncate text-sm">{nameOf(p)}</span>
                         {share !== undefined && <span className="text-sm text-ink-2">{money(share, currency, lang)}</span>}
                       </label>

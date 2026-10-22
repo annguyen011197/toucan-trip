@@ -1,4 +1,4 @@
-import type { ChatMessage, CommentStatus, Trip, TripComment, TripExpense, TripMember, UserProfile } from "../types";
+import type { ChatMessage, CommentStatus, Trip, TripComment, TripExpense, TripMember, TripTraveler, UserProfile } from "../types";
 
 export type Unsubscribe = () => void;
 
@@ -26,6 +26,11 @@ export interface TripStore {
   subscribeExpenses(tripId: string, cb: (expenses: TripExpense[]) => void): Unsubscribe;
   saveExpense(expense: TripExpense, isNew: boolean): Promise<void>;
   deleteExpense(expense: TripExpense): Promise<void>;
+  /** Who is going (owner and members read; owner adds anyone, a member adds/removes themselves). */
+  subscribeTravelers(tripId: string, cb: (travelers: TripTraveler[]) => void): Unsubscribe;
+  addTraveler(traveler: TripTraveler): Promise<void>;
+  renameTraveler(traveler: TripTraveler, name: string): Promise<void>;
+  removeTraveler(traveler: TripTraveler): Promise<void>;
   listMembers(tripId: string): Promise<TripMember[]>;
   /** Owner removes a member, or a member leaves (their own row). */
   removeMember(member: TripMember): Promise<void>;

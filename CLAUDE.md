@@ -59,6 +59,12 @@ Debug AI calls with `DEBUG_AI=1 npm run dev`: `lib/debug.ts` logs each AI route'
 - Splitwise-style sharing: `paid_by` (+ `paid_by_name`) and `split` jsonb `{ mode: "equal" | "exact", shares: [{ key, name, amount }] }`. Keys are Firebase uids or `guest:<name>` for people without the app; share amounts are in the expense's currency and must add up to it (`splitEqually` hands leftover smallest units to the first people). Null `paid_by` = the author paid; null `split` = the payer's own expense. `computeBalances` / `settleUp` (`lib/expenses.ts`) work in the trip currency.
 - `/api/trips/expenses/categorize` (owner only) re-picks every expense's category with Gemini (`lib/engines/categorize.ts`, keyword fallback `guessCategory`). It writes with the service role because members' rows are only updatable by their authors.
 
+**Travelers (`supabase/migrations/*_travelers.sql`, `components/Travelers.tsx`).**
+- `trip_travelers` = who is actually going, separate from who the trip is shared with. The owner is always going and isn't stored.
+- `user_id` set = a member with the app (the owner adds members; a member can add/remove themselves). `user_id` null = a virtual traveler (name only) the owner added.
+- Expense key for a traveler is `travelerKey()`: the user id, or `traveler:<id>` for virtual ones. `/api/trips/travelers/link` (owner, service role) links a virtual traveler to a member and rewrites their expense payer/shares (`rekeyExpense`).
+- Splits default to the people going; the spent-vs-estimate bar multiplies by the travelers count when the list isn't empty.
+
 **i18n.**
 - `lib/i18n.ts` holds the `en` dictionary, which defines `MessageKey`, and a `vi: Record<MessageKey, string>`. Adding a key to `en` without adding it to `vi` fails the typecheck.
 - `t(key, vars)` substitutes `{var}` placeholders.

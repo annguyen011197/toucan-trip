@@ -20,7 +20,8 @@ import { ImagePicker } from "./ImagePicker";
 import { ConvertDialog, conversionFor, type Conversion } from "./ConvertDialog";
 import { ShareSheet } from "./ShareSheet";
 import { ReviewSheet, StopComments, useTripComments } from "./Comments";
-import { ExpenseSummaryCard, ExpensesSheet, StopExpenseButton, useExpenseSummary, useTripExpenses, type ExpenseDraft } from "./Expenses";
+import { ExpenseSummaryCard, ExpensesSheet, StopExpenseButton, ownerNameFrom, useExpenseSummary, useTripExpenses, type ExpenseDraft } from "./Expenses";
+import { TravelersCard, TravelersSheet, travelerCount, useTripTravelers } from "./Travelers";
 import { expenseDraftFor } from "@/lib/expenses";
 
 const DISMISSED_KEY = "toucan-trip:convert-dismissed";
@@ -33,7 +34,7 @@ function readDismissed(): string[] {
 const TripMap = dynamic(() => import("./TripMap"), { ssr: false, loading: () => <div className="h-full w-full animate-pulse bg-surface" /> });
 
 export function ItineraryView({ trip }: { trip: Trip }) {
-  const { setTab, applyItinerary, setStatus, setTripCover, setStopImage, currency, convertTrip, isOwner } = useApp();
+  const { setTab, applyItinerary, setStatus, setTripCover, setStopImage, currency, convertTrip, isOwner, profile } = useApp();
   const { t, lang } = useI18n();
   // Members of a shared trip only read and comment; every edit control is the owner's.
   const owner = isOwner(trip);
@@ -41,8 +42,11 @@ export function ItineraryView({ trip }: { trip: Trip }) {
   const [picker, setPicker] = useState<{ kind: "cover" } | { kind: "stop"; item: ItineraryItem }>();
   const expenses = useTripExpenses(trip.id);
   const spent = useExpenseSummary(trip, expenses);
+  const travelers = useTripTravelers(trip.id);
+  const groupSize = travelers.length ? travelerCount(trip, travelers) : trip.travelers ?? 1;
+  const ownerName = owner ? profile.name || t("share.you") : ownerNameFrom(trip, expenses) || t("expense.owner");
   const [sheet, setSheet] = useState<{ kind: "share" } | { kind: "review" } | { kind: "comments"; item: ItineraryItem; day: number }
-    | { kind: "expenses"; draft?: ExpenseDraft }>();
+    | { kind: "expenses"; draft?: ExpenseDraft } | { kind: "travelers" }>();
   const toReview = comments.filter((c) => c.status === "open").length;
   const approved = comments.filter((c) => c.status === "approved").length;
   const [selectedDay, setSelectedDay] = useState(1);
@@ -224,7 +228,8 @@ export function ItineraryView({ trip }: { trip: Trip }) {
           </>
         )}
 
-        <ExpenseSummaryCard trip={trip} summary={spent} count={expenses.length} onOpen={() => setSheet({ kind: "expenses" })} />
+        <TravelersCard trip={trip} travelers={travelers} ownerName={ownerName} onOpen={() => setSheet({ kind: "travelers" })} />
+        <ExpenseSummaryCard trip={trip} summary={spent} count={expenses.length} groupSize={groupSize} onOpen={() => setSheet({ kind: "expenses" })} />
 
         {city?.tip && (
           <div className="mx-5 rounded-card border border-primary/12 bg-primary-soft/60 p-5">
@@ -252,7 +257,10 @@ export function ItineraryView({ trip }: { trip: Trip }) {
         <StopComments trip={trip} item={sheet.item} day={sheet.day} comments={comments} onClose={() => setSheet(undefined)} />
       )}
       {sheet?.kind === "expenses" && (
-        <ExpensesSheet trip={trip} expenses={expenses} summary={spent} draft={sheet.draft} onClose={() => setSheet(undefined)} />
+        <ExpensesSheet trip={trip} expenses={expenses} travelers={travelers} summary={spent} draft={sheet.draft} onClose={() => setSheet(undefined)} />
+      )}
+      {sheet?.kind === "travelers" && (
+        <TravelersSheet trip={trip} travelers={travelers} ownerName={ownerName} onClose={() => setSheet(undefined)} />
       )}
       {offer && (
         <ConvertDialog trip={trip} conversion={offer} onClose={closeConvert}

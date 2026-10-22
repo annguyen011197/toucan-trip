@@ -1,5 +1,5 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import type { ChatMessage, CommentStatus, Trip, TripComment, TripExpense, TripMember, UserProfile } from "../types";
+import type { ChatMessage, CommentStatus, Trip, TripComment, TripExpense, TripMember, TripTraveler, UserProfile } from "../types";
 import { supabase } from "../supabase";
 import type { TripStore, Unsubscribe } from "./types";
 
@@ -10,6 +10,7 @@ import type { TripStore, Unsubscribe } from "./types";
  *   messages(trip_id, created_at, seq) — owner only; append-only, except compaction (older messages → one summary)
  *   trip_members, trip_share_links, trip_comments — sharing and per-stop comments
  *   trip_expenses — actual spending, logged by the owner and members
+ *   trip_travelers — who is going (members and virtual travelers; the owner is implicit)
  * Writes update a local cache first so the UI is instant; Realtime keeps other tabs/devices in sync.
  */
 export class SupabaseStore implements TripStore {
@@ -25,6 +26,9 @@ export class SupabaseStore implements TripStore {
   private expenses = new Map<string, TripExpense[]>();
   private expenseSubs = new Map<string, Set<(e: TripExpense[]) => void>>();
   private expenseChannels = new Map<string, RealtimeChannel>();
+  private travelers = new Map<string, TripTraveler[]>();
+  private travelerSubs = new Map<string, Set<(t: TripTraveler[]) => void>>();
+  private travelerChannels = new Map<string, RealtimeChannel>();
 
   constructor(private uid: string) {}
 
@@ -229,6 +233,77 @@ export class SupabaseStore implements TripStore {
     if (error) { await this.loadExpenses(expense.tripId); throw new Error(error.message); }
   }
 
+  // ───────────── travelers ─────────────
+
+  subscribeTravelers(tripId: string, cb: (travelers: TripTraveler[]) => void): Unsubscribe {
+    const subs = this.travelerSubs.get(tripId) ?? new Set();
+    subs.add(cb);
+    this.travelerSubs.set(tripId, subs);
+    const cached = this.travelers.get(tripId);
+    if (cached) cb(cached);
+    else this.loadTravelers(tripId);
+    if (!this.travelerChannels.has(tripId)) {
+      const upsert = (p: { new: unknown }) => this.upsertTraveler(tripId, rowToTraveler(p.new as TravelerRow));
+      this.travelerChannels.set(tripId, supabase()
+        .channel(`travelers:${tripId}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "trip_travelers", filter: `trip_id=eq.${tripId}` }, upsert)
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "trip_travelers", filter: `trip_id=eq.${tripId}` }, upsert)
+        // DELETE events can't be filtered and only carry the primary key under RLS.
+        .on("postgres_changes", { event: "DELETE", schema: "public", table: "trip_travelers" },
+          (p) => this.dropTraveler(tripId, (p.old as { id?: string }).id))
+        .subscribe());
+    }
+    return () => {
+      subs.delete(cb);
+      if (subs.size) return;
+      const ch = this.travelerChannels.get(tripId);
+      if (ch) supabase().removeChannel(ch);
+      this.travelerChannels.delete(tripId);
+      this.travelers.delete(tripId);
+    };
+  }
+
+  private async loadTravelers(tripId: string) {
+    const { data, error } = await supabase().from("trip_travelers").select("*").eq("trip_id", tripId).order("created_at");
+    if (error) { console.error("[supabase] travelers", error); return; }
+    this.setTravelers(tripId, (data as TravelerRow[]).map(rowToTraveler));
+  }
+
+  private setTravelers(tripId: string, list: TripTraveler[]) {
+    list = [...list].sort((a, b) => a.createdAt - b.createdAt);
+    this.travelers.set(tripId, list);
+    this.travelerSubs.get(tripId)?.forEach((cb) => cb(list));
+  }
+
+  private upsertTraveler(tripId: string, traveler: TripTraveler) {
+    const list = this.travelers.get(tripId) ?? [];
+    this.setTravelers(tripId, [...list.filter((t) => t.id !== traveler.id), traveler]);
+  }
+
+  private dropTraveler(tripId: string, id?: string) {
+    const list = this.travelers.get(tripId);
+    if (id && list?.some((t) => t.id === id)) this.setTravelers(tripId, list.filter((t) => t.id !== id));
+  }
+
+  async addTraveler(t: TripTraveler) {
+    this.upsertTraveler(t.tripId, t);
+    const { error } = await supabase().from("trip_travelers")
+      .insert({ id: t.id, trip_id: t.tripId, user_id: t.userId ?? null, name: t.name, created_by: this.uid, created_at: iso(t.createdAt) });
+    if (error) { this.dropTraveler(t.tripId, t.id); throw new Error(error.message); }
+  }
+
+  async renameTraveler(t: TripTraveler, name: string) {
+    this.upsertTraveler(t.tripId, { ...t, name });
+    const { error } = await supabase().from("trip_travelers").update({ name }).eq("id", t.id);
+    if (error) { await this.loadTravelers(t.tripId); throw new Error(error.message); }
+  }
+
+  async removeTraveler(t: TripTraveler) {
+    this.dropTraveler(t.tripId, t.id);
+    const { error } = await supabase().from("trip_travelers").delete().eq("id", t.id);
+    if (error) { await this.loadTravelers(t.tripId); throw new Error(error.message); }
+  }
+
   // ───────────── members + share link ─────────────
 
   async listMembers(tripId: string) {
@@ -362,6 +437,9 @@ export class SupabaseStore implements TripStore {
     this.commentChannels.clear();
     this.expenseChannels.forEach((ch) => sb.removeChannel(ch));
     this.expenseChannels.clear();
+    this.travelerChannels.forEach((ch) => sb.removeChannel(ch));
+    this.travelerChannels.clear();
+    this.travelerSubs.clear();
     this.tripSubs.clear();
     this.expenseSubs.clear();
     this.msgSubs.clear();
@@ -396,6 +474,8 @@ interface ExpenseRow {
   paid_by: string | null; paid_by_name: string; split: TripExpense["split"] | null;
   spent_at: string; created_at: string;
 }
+
+interface TravelerRow { id: string; trip_id: string; user_id: string | null; name: string; created_at: string }
 
 interface MemberRow {
   id: string; trip_id: string; user_id: string | null; email: string | null; display_name: string | null;
@@ -484,4 +564,8 @@ function expenseToRow(e: TripExpense): ExpenseRow {
     paid_by: e.paidBy?.key ?? null, paid_by_name: e.paidBy?.name ?? "", split: e.split ?? null,
     spent_at: iso(e.spentAt), created_at: iso(e.createdAt),
   };
+}
+
+function rowToTraveler(r: TravelerRow): TripTraveler {
+  return { id: r.id, tripId: r.trip_id, userId: r.user_id ?? undefined, name: r.name ?? "", createdAt: Date.parse(r.created_at) };
 }

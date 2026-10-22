@@ -76,3 +76,12 @@ test("guessCategory reads Vietnamese and English", async () => {
   assert.equal(guessCategory("Bia ở bar", "food"), "nightlife");
   assert.equal(guessCategory("abc", "other"), "other");
 });
+
+test("rekeyExpense moves a virtual traveler's payment and shares to a real member", async () => {
+  const { rekeyExpense } = await import("./expenses");
+  const v = { key: "traveler:1", name: "Minh" }, me = { key: "u1", name: "Minh" }, b = { key: "u2", name: "Bình" };
+  assert.equal(rekeyExpense({ paidBy: b }, v.key, me), undefined);
+  const r = rekeyExpense({ paidBy: v, split: { mode: "exact", shares: [{ ...v, amount: 30 }, { ...me, amount: 20 }, { ...b, amount: 50 }] } }, v.key, me);
+  assert.deepEqual(r?.paidBy, me);
+  assert.deepEqual(r?.split?.shares.map((s) => [s.key, s.amount]), [["u1", 50], ["u2", 50]]);
+});

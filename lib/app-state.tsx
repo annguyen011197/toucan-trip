@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { CategorizeResponse, ChatMessage, ChatResponse, CommentStatus, ItineraryItem, ItineraryOp, ReviseResponse, Trip, TripComment, TripExpense, TripMember, TripStatus, UserProfile } from "./types";
+import type { CategorizeResponse, ChatMessage, ChatResponse, CommentStatus, ItineraryItem, ItineraryOp, ReviseResponse, Trip, TripComment, TripExpense, TripMember, TripTraveler, TripStatus, UserProfile } from "./types";
 import { DEFAULT_PROFILE } from "./types";
 import type { TripStore } from "./store/types";
 import { SupabaseStore } from "./store/supabase-store";
@@ -83,6 +83,13 @@ interface AppContextValue {
   deleteExpense: (expense: TripExpense) => Promise<void>;
   /** Owner: AI re-picks the category of every expense on the trip (server-side, all authors). */
   recategorizeExpenses: (trip: Trip) => Promise<CategorizeResponse>;
+  subscribeTravelers: (tripId: string, cb: (t: TripTraveler[]) => void) => () => void;
+  /** Owner: a virtual traveler (`name`) or a member (`userId`); member: themselves (`userId` = own uid). */
+  addTraveler: (trip: Trip, who: { userId?: string; name: string }) => Promise<void>;
+  renameTraveler: (traveler: TripTraveler, name: string) => Promise<void>;
+  removeTraveler: (traveler: TripTraveler) => Promise<void>;
+  /** Owner: turns a virtual traveler into a member who joined; their expenses move over. */
+  linkTraveler: (traveler: TripTraveler, userId: string) => Promise<void>;
   listMembers: (trip: Trip) => Promise<TripMember[]>;
   inviteMember: (trip: Trip, email: string) => Promise<{ member: TripMember; existing: boolean }>;
   removeMember: (member: TripMember) => Promise<void>;
@@ -363,6 +370,30 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     return data;
   }, [idToken]);
 
+  const subscribeTravelers = useCallback((tripId: string, cb: (t: TripTraveler[]) => void) => {
+    return storeRef.current ? storeRef.current.subscribeTravelers(tripId, cb) : () => {};
+  }, []);
+
+  const addTraveler = useCallback((trip: Trip, who: { userId?: string; name: string }) => {
+    // Never store a blank name: if the account is deleted later the row falls back to it.
+    const name = who.name.trim() || (who.userId === userId ? user?.displayName || user?.email?.split("@")[0] : "") || "?";
+    return store().addTraveler({ id: uid(), tripId: trip.id, userId: who.userId, name, createdAt: Date.now() });
+  }, [userId, user]);
+
+  const renameTraveler = useCallback((traveler: TripTraveler, name: string) => store().renameTraveler(traveler, name.trim()), []);
+
+  const removeTraveler = useCallback((traveler: TripTraveler) => store().removeTraveler(traveler), []);
+
+  const linkTraveler = useCallback(async (traveler: TripTraveler, userId: string) => {
+    const res = await fetch("/api/trips/travelers/link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+      body: JSON.stringify({ travelerId: traveler.id, userId }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  }, [idToken]);
+
   const listMembers = useCallback((trip: Trip) => store().listMembers(trip.id), []);
 
   const inviteMember = useCallback(async (trip: Trip, email: string) => {
@@ -395,9 +426,9 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     ready, engine, uid: userId, trips, profile, currency, tab, setTab,
     selectedTrip: trips.find((tr) => tr.id === selectedId),
     selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, listMembers, inviteMember, removeMember, getShareLink, resetShareLink,
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, subscribeTravelers, addTraveler, renameTraveler, removeTraveler, linkTraveler, listMembers, inviteMember, removeMember, getShareLink, resetShareLink,
   }), [ready, engine, userId, trips, profile, currency, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, listMembers, inviteMember, removeMember, getShareLink, resetShareLink]);
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, subscribeTravelers, addTraveler, renameTraveler, removeTraveler, linkTraveler, listMembers, inviteMember, removeMember, getShareLink, resetShareLink]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

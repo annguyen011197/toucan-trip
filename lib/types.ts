@@ -101,6 +101,19 @@ export interface TripComment {
   resolvedAt?: number;
 }
 
+/** Someone actually going on the trip (the owner always is and isn't stored). */
+export interface TripTraveler {
+  id: string;
+  tripId: string;
+  /** A member with the app; unset = virtual traveler (name only) until the owner links them to a member. */
+  userId?: string;
+  name: string;
+  createdAt: number;
+}
+
+/** Key a traveler has in expenses (payer / split shares). */
+export const travelerKey = (t: Pick<TripTraveler, "id" | "userId">) => t.userId ?? `traveler:${t.id}`;
+
 // ───────────── Expenses ─────────────
 
 /** Someone an expense is paid by or split with: a user (Firebase uid) or a guest without an account ("guest:<name>"). */
