@@ -4,7 +4,7 @@ import { FALLBACK_USD_RATES } from "../currency";
 const RATES_URL = "https://open.er-api.com/v6/latest/USD";
 
 /** Units of each currency per 1 USD. Cached by Next for 12h; falls back to rough built-in rates. */
-async function usdRates(): Promise<Record<string, number>> {
+export async function usdRates(): Promise<Record<string, number>> {
   try {
     const res = await fetch(RATES_URL, { next: { revalidate: 43_200 }, signal: AbortSignal.timeout(5_000) });
     const data = (await res.json()) as { result?: string; rates?: Record<string, number> };

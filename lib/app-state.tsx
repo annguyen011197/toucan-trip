@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ChatMessage, ChatResponse, CommentStatus, ItineraryItem, ItineraryOp, ReviseResponse, Trip, TripComment, TripMember, TripStatus, UserProfile } from "./types";
+import type { ChatMessage, ChatResponse, CommentStatus, ItineraryItem, ItineraryOp, ReviseResponse, Trip, TripComment, TripExpense, TripMember, TripStatus, UserProfile } from "./types";
 import { DEFAULT_PROFILE } from "./types";
 import type { TripStore } from "./store/types";
 import { SupabaseStore } from "./store/supabase-store";
@@ -77,6 +77,10 @@ interface AppContextValue {
   reviewComments: (trip: Trip, ids: string[], status: CommentStatus) => Promise<void>;
   /** Owner: revises the itinerary from approved comments with AI, saves it and marks them applied. */
   applyComments: (trip: Trip, comments: TripComment[]) => Promise<ReviseResponse>;
+  subscribeExpenses: (tripId: string, cb: (e: TripExpense[]) => void) => () => void;
+  /** Adds (no `id`) or edits an expense; the author is the signed-in user. */
+  saveExpense: (trip: Trip, expense: ExpenseInput) => Promise<void>;
+  deleteExpense: (expense: TripExpense) => Promise<void>;
   listMembers: (trip: Trip) => Promise<TripMember[]>;
   inviteMember: (trip: Trip, email: string) => Promise<{ member: TripMember; existing: boolean }>;
   removeMember: (member: TripMember) => Promise<void>;
@@ -85,6 +89,8 @@ interface AppContextValue {
   /** Owner: turns link sharing on with a new link (old ones stop working) or off. */
   resetShareLink: (trip: Trip, enabled: boolean) => Promise<string | undefined>;
 }
+
+export type ExpenseInput = Omit<TripExpense, "id" | "tripId" | "authorId" | "authorName" | "createdAt"> & { id?: string; createdAt?: number };
 
 const AppContext = createContext<AppContextValue | null>(null);
 
@@ -326,6 +332,20 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     return data;
   }, [idToken, lang, t]);
 
+  const subscribeExpenses = useCallback((tripId: string, cb: (e: TripExpense[]) => void) => {
+    return storeRef.current ? storeRef.current.subscribeExpenses(tripId, cb) : () => {};
+  }, []);
+
+  const saveExpense = useCallback(async (trip: Trip, input: ExpenseInput) => {
+    const isNew = !input.id;
+    await store().saveExpense({
+      ...input, id: input.id ?? uid(), tripId: trip.id, authorId: userId, createdAt: input.createdAt ?? Date.now(),
+      authorName: profile.name || user?.displayName || user?.email?.split("@")[0] || "",
+    }, isNew);
+  }, [userId, profile.name, user]);
+
+  const deleteExpense = useCallback((expense: TripExpense) => store().deleteExpense(expense), []);
+
   const listMembers = useCallback((trip: Trip) => store().listMembers(trip.id), []);
 
   const inviteMember = useCallback(async (trip: Trip, email: string) => {
@@ -358,9 +378,9 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     ready, engine, uid: userId, trips, profile, currency, tab, setTab,
     selectedTrip: trips.find((tr) => tr.id === selectedId),
     selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, listMembers, inviteMember, removeMember, getShareLink, resetShareLink,
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, listMembers, inviteMember, removeMember, getShareLink, resetShareLink,
   }), [ready, engine, userId, trips, profile, currency, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, listMembers, inviteMember, removeMember, getShareLink, resetShareLink]);
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, listMembers, inviteMember, removeMember, getShareLink, resetShareLink]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

@@ -1,5 +1,5 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import type { ChatMessage, CommentStatus, Trip, TripComment, TripMember, UserProfile } from "../types";
+import type { ChatMessage, CommentStatus, Trip, TripComment, TripExpense, TripMember, UserProfile } from "../types";
 import { supabase } from "../supabase";
 import type { TripStore, Unsubscribe } from "./types";
 
@@ -9,6 +9,7 @@ import type { TripStore, Unsubscribe } from "./types";
  *   trips(owner_id = uid, itinerary jsonb) — plus trips shared with the user (trip_members), read-only
  *   messages(trip_id, created_at, seq) — owner only; append-only, except compaction (older messages → one summary)
  *   trip_members, trip_share_links, trip_comments — sharing and per-stop comments
+ *   trip_expenses — actual spending, logged by the owner and members
  * Writes update a local cache first so the UI is instant; Realtime keeps other tabs/devices in sync.
  */
 export class SupabaseStore implements TripStore {
@@ -21,6 +22,9 @@ export class SupabaseStore implements TripStore {
   private comments = new Map<string, TripComment[]>();
   private commentSubs = new Map<string, Set<(c: TripComment[]) => void>>();
   private commentChannels = new Map<string, RealtimeChannel>();
+  private expenses = new Map<string, TripExpense[]>();
+  private expenseSubs = new Map<string, Set<(e: TripExpense[]) => void>>();
+  private expenseChannels = new Map<string, RealtimeChannel>();
 
   constructor(private uid: string) {}
 
@@ -149,6 +153,79 @@ export class SupabaseStore implements TripStore {
     const { error } = await supabase().from("trip_comments")
       .update({ status, resolved_at: resolvedAt ? iso(resolvedAt) : null }).eq("trip_id", tripId).in("id", ids);
     if (error) { await this.loadComments(tripId); throw new Error(error.message); }
+  }
+
+  // ───────────── expenses ─────────────
+
+  subscribeExpenses(tripId: string, cb: (expenses: TripExpense[]) => void): Unsubscribe {
+    const subs = this.expenseSubs.get(tripId) ?? new Set();
+    subs.add(cb);
+    this.expenseSubs.set(tripId, subs);
+    const cached = this.expenses.get(tripId);
+    if (cached) cb(cached);
+    else this.loadExpenses(tripId);
+    if (!this.expenseChannels.has(tripId)) {
+      const upsert = (p: { new: unknown }) => this.upsertExpense(tripId, rowToExpense(p.new as ExpenseRow));
+      this.expenseChannels.set(tripId, supabase()
+        .channel(`expenses:${tripId}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "trip_expenses", filter: `trip_id=eq.${tripId}` }, upsert)
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "trip_expenses", filter: `trip_id=eq.${tripId}` }, upsert)
+        // DELETE events can't be filtered and only carry the primary key under RLS.
+        .on("postgres_changes", { event: "DELETE", schema: "public", table: "trip_expenses" },
+          (p) => this.dropExpense(tripId, (p.old as { id?: string }).id))
+        .subscribe());
+    }
+    return () => {
+      subs.delete(cb);
+      if (subs.size) return;
+      const ch = this.expenseChannels.get(tripId);
+      if (ch) supabase().removeChannel(ch);
+      this.expenseChannels.delete(tripId);
+      this.expenses.delete(tripId);
+    };
+  }
+
+  private async loadExpenses(tripId: string) {
+    const { data, error } = await supabase().from("trip_expenses").select("*").eq("trip_id", tripId).order("spent_at");
+    if (error) { console.error("[supabase] expenses", error); return; }
+    const loaded = (data as ExpenseRow[]).map(rowToExpense);
+    const ids = new Set(loaded.map((e) => e.id));
+    this.setExpenses(tripId, [...loaded, ...(this.expenses.get(tripId) ?? []).filter((e) => !ids.has(e.id))]);
+  }
+
+  private setExpenses(tripId: string, list: TripExpense[]) {
+    list = [...list].sort((a, b) => b.spentAt - a.spentAt || b.createdAt - a.createdAt); // newest first
+    this.expenses.set(tripId, list);
+    this.expenseSubs.get(tripId)?.forEach((cb) => cb(list));
+  }
+
+  private upsertExpense(tripId: string, expense: TripExpense) {
+    const list = this.expenses.get(tripId) ?? [];
+    this.setExpenses(tripId, [...list.filter((e) => e.id !== expense.id), expense]);
+  }
+
+  private dropExpense(tripId: string, id?: string) {
+    const list = this.expenses.get(tripId);
+    if (id && list?.some((e) => e.id === id)) this.setExpenses(tripId, list.filter((e) => e.id !== id));
+  }
+
+  async saveExpense(expense: TripExpense, isNew: boolean) {
+    this.upsertExpense(expense.tripId, expense);
+    const row = expenseToRow(expense);
+    const { error } = isNew
+      ? await supabase().from("trip_expenses").insert(row)
+      // Only the columns `authenticated` may update (trip, author and created_at stay fixed).
+      : await supabase().from("trip_expenses").update({
+        item_id: row.item_id, day: row.day, title: row.title, amount: row.amount, currency: row.currency,
+        category: row.category, note: row.note, spent_at: row.spent_at,
+      }).eq("id", expense.id);
+    if (error) { await this.loadExpenses(expense.tripId); throw new Error(error.message); }
+  }
+
+  async deleteExpense(expense: TripExpense) {
+    this.dropExpense(expense.tripId, expense.id);
+    const { error } = await supabase().from("trip_expenses").delete().eq("id", expense.id);
+    if (error) { await this.loadExpenses(expense.tripId); throw new Error(error.message); }
   }
 
   // ───────────── members + share link ─────────────
@@ -282,7 +359,10 @@ export class SupabaseStore implements TripStore {
     this.msgChannels.clear();
     this.commentChannels.forEach((ch) => sb.removeChannel(ch));
     this.commentChannels.clear();
+    this.expenseChannels.forEach((ch) => sb.removeChannel(ch));
+    this.expenseChannels.clear();
     this.tripSubs.clear();
+    this.expenseSubs.clear();
     this.msgSubs.clear();
     this.commentSubs.clear();
   }
@@ -305,6 +385,14 @@ interface MessageRow {
 interface CommentRow {
   id: string; trip_id: string; item_id: string; day: number | null; item_title: string; author_id: string; author_name: string;
   text: string; status: TripComment["status"]; resolved_at: string | null; created_at: string;
+}
+
+interface ExpenseRow {
+  id: string; trip_id: string; item_id: string | null; day: number | null; title: string;
+  /** numeric comes back as a string. */
+  amount: number | string;
+  currency: string; category: TripExpense["category"]; note: string; author_id: string; author_name: string;
+  spent_at: string; created_at: string;
 }
 
 interface MemberRow {
@@ -374,5 +462,21 @@ function rowToMember(r: MemberRow): TripMember {
   return {
     id: r.id, tripId: r.trip_id, userId: r.user_id ?? undefined, email: r.email ?? undefined,
     displayName: r.display_name ?? undefined, role: r.role, createdAt: Date.parse(r.created_at),
+  };
+}
+
+function rowToExpense(r: ExpenseRow): TripExpense {
+  return {
+    id: r.id, tripId: r.trip_id, itemId: r.item_id ?? undefined, day: r.day ?? undefined, title: r.title,
+    amount: Number(r.amount), currency: r.currency, category: r.category, note: r.note ?? "",
+    authorId: r.author_id, authorName: r.author_name, spentAt: Date.parse(r.spent_at), createdAt: Date.parse(r.created_at),
+  };
+}
+
+function expenseToRow(e: TripExpense): ExpenseRow {
+  return {
+    id: e.id, trip_id: e.tripId, item_id: e.itemId ?? null, day: e.day ?? null, title: e.title, amount: e.amount,
+    currency: e.currency, category: e.category, note: e.note, author_id: e.authorId, author_name: e.authorName,
+    spent_at: iso(e.spentAt), created_at: iso(e.createdAt),
   };
 }

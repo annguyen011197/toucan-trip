@@ -20,6 +20,8 @@ import { ImagePicker } from "./ImagePicker";
 import { ConvertDialog, conversionFor, type Conversion } from "./ConvertDialog";
 import { ShareSheet } from "./ShareSheet";
 import { ReviewSheet, StopComments, useTripComments } from "./Comments";
+import { ExpenseSummaryCard, ExpensesSheet, StopExpenseButton, useExpenseSummary, useTripExpenses, type ExpenseDraft } from "./Expenses";
+import { expenseDraftFor } from "@/lib/expenses";
 
 const DISMISSED_KEY = "toucan-trip:convert-dismissed";
 
@@ -37,7 +39,10 @@ export function ItineraryView({ trip }: { trip: Trip }) {
   const owner = isOwner(trip);
   const comments = useTripComments(trip.id);
   const [picker, setPicker] = useState<{ kind: "cover" } | { kind: "stop"; item: ItineraryItem }>();
-  const [sheet, setSheet] = useState<{ kind: "share" } | { kind: "review" } | { kind: "comments"; item: ItineraryItem; day: number }>();
+  const expenses = useTripExpenses(trip.id);
+  const spent = useExpenseSummary(trip, expenses);
+  const [sheet, setSheet] = useState<{ kind: "share" } | { kind: "review" } | { kind: "comments"; item: ItineraryItem; day: number }
+    | { kind: "expenses"; draft?: ExpenseDraft }>();
   const toReview = comments.filter((c) => c.status === "open").length;
   const approved = comments.filter((c) => c.status === "approved").length;
   const [selectedDay, setSelectedDay] = useState(1);
@@ -192,7 +197,8 @@ export function ItineraryView({ trip }: { trip: Trip }) {
                       <TimelineRow key={item.id} item={item} first={idx === 0} last={idx === day.items.length - 1}
                         next={day.items[idx + 1]} destination={trip.destination} currency={trip.currency} editable={owner}
                         comments={comments.filter((c) => c.itemId === item.id)} onRemove={() => remove(item)}
-                        onImage={() => setPicker({ kind: "stop", item })} onComments={() => setSheet({ kind: "comments", item, day: day.day })} />
+                        onImage={() => setPicker({ kind: "stop", item })} onComments={() => setSheet({ kind: "comments", item, day: day.day })}
+                        spent={spent.byItem[item.id]} onExpense={() => setSheet({ kind: "expenses", draft: expenseDraftFor(item, day.day, trip.currency) })} />
                     ))}
                   </SortableContext>
                 </DndContext>
@@ -217,6 +223,8 @@ export function ItineraryView({ trip }: { trip: Trip }) {
             </div>
           </>
         )}
+
+        <ExpenseSummaryCard trip={trip} summary={spent} count={expenses.length} onOpen={() => setSheet({ kind: "expenses" })} />
 
         {city?.tip && (
           <div className="mx-5 rounded-card border border-primary/12 bg-primary-soft/60 p-5">
@@ -243,6 +251,9 @@ export function ItineraryView({ trip }: { trip: Trip }) {
       {sheet?.kind === "comments" && (
         <StopComments trip={trip} item={sheet.item} day={sheet.day} comments={comments} onClose={() => setSheet(undefined)} />
       )}
+      {sheet?.kind === "expenses" && (
+        <ExpensesSheet trip={trip} expenses={expenses} summary={spent} draft={sheet.draft} onClose={() => setSheet(undefined)} />
+      )}
       {offer && (
         <ConvertDialog trip={trip} conversion={offer} onClose={closeConvert}
           onConvert={async () => { await convertTrip(trip); setOffer(undefined); }} />
@@ -260,12 +271,14 @@ export function ItineraryView({ trip }: { trip: Trip }) {
   );
 }
 
-function TimelineRow({ item, first, last, next, destination, currency, editable, comments, onRemove, onImage, onComments }: {
+function TimelineRow({ item, first, last, next, destination, currency, editable, comments, spent, onRemove, onImage, onComments, onExpense }: {
   item: ItineraryItem; first: boolean; last: boolean; next?: ItineraryItem; destination?: string; currency: string;
   /** Owner: drag, photo and remove controls. */
   editable: boolean;
   comments: TripComment[];
-  onRemove: () => void; onImage: () => void; onComments: () => void;
+  /** Actually spent at this stop, in the trip currency. */
+  spent?: number;
+  onRemove: () => void; onImage: () => void; onComments: () => void; onExpense: () => void;
 }) {
   const { t, lang } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: !editable });
@@ -285,6 +298,7 @@ function TimelineRow({ item, first, last, next, destination, currency, editable,
           {editable && <GripVertical className="h-3.5 w-3.5 text-muted/60" />}
           <span className="flex-1" />
           {item.estCost > 0 && <span className="text-xs font-medium text-ink-2">{money(item.estCost, currency, lang)}</span>}
+          <StopExpenseButton spent={spent} currency={currency} title={item.title} onClick={onExpense} />
           <button aria-label={t("itin.commentsFor", { title: item.title, n: comments.length })} onPointerDown={(e) => e.stopPropagation()} onClick={onComments}
             className={cn("flex h-6 min-w-6 items-center justify-center gap-0.5 rounded-full px-1 text-[11px] font-bold",
               unresolved ? "bg-amber-100 text-amber-800" : "text-muted hover:bg-surface hover:text-ink")}>

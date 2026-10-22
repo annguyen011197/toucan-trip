@@ -101,6 +101,28 @@ export interface TripComment {
   resolvedAt?: number;
 }
 
+// ───────────── Expenses ─────────────
+
+/** Money actually spent on the trip, logged by the owner or a member. */
+export interface TripExpense {
+  id: string;
+  tripId: string;
+  /** ItineraryItem.id it was spent at, if any. */
+  itemId?: string;
+  /** Unset = not tied to a day (e.g. a SIM card bought before the trip). */
+  day?: number;
+  title: string;
+  amount: number;
+  /** Currency it was paid in; may differ from the trip's. */
+  currency: string;
+  category: ItemCategory;
+  note: string;
+  authorId: string;
+  authorName: string;
+  spentAt: number;
+  createdAt: number;
+}
+
 export type MessageRole = "user" | "bot";
 /** `summary` replaces older messages after compaction. */
 export type MessageType = "text" | "quickReplies" | "flightCard" | "hotelCard" | "placeCard" | "itineraryUpdate" | "summary";
