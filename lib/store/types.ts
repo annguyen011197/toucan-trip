@@ -2,6 +2,8 @@ import type { ChatMessage, CommentStatus, Trip, TripComment, TripExpense, TripMe
 
 export type Unsubscribe = () => void;
 
+export interface PublicLink { token: string; showExpenses: boolean }
+
 /**
  * Persistence + realtime for the signed-in user. Every view subscribes, so an edit from Chat or the
  * Itinerary tab shows up everywhere (local cache + Supabase Realtime for other tabs/devices).
@@ -38,6 +40,10 @@ export interface TripStore {
   getShareToken(tripId: string): Promise<string | undefined>;
   /** Owner only: turns link sharing on with a fresh token (old links stop working) or off. */
   resetShareToken(tripId: string, enabled: boolean): Promise<string | undefined>;
+  /** Owner only: the public read-only link (/p/<token>), if on. */
+  getPublicLink(tripId: string): Promise<PublicLink | undefined>;
+  /** Owner only: off, on (keeps the token unless `reset`), and whether spending shows. */
+  setPublicLink(tripId: string, opts: { enabled: boolean; showExpenses: boolean; reset?: boolean }): Promise<PublicLink | undefined>;
   getProfile(): Promise<Partial<UserProfile> | undefined>;
   saveProfile(profile: UserProfile): Promise<void>;
   dispose(): void;

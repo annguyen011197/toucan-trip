@@ -1,7 +1,7 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { ChatMessage, CommentStatus, Trip, TripComment, TripExpense, TripMember, TripTraveler, UserProfile } from "../types";
 import { supabase } from "../supabase";
-import type { TripStore, Unsubscribe } from "./types";
+import type { PublicLink, TripStore, Unsubscribe } from "./types";
 
 /**
  * Supabase Postgres store (see supabase/migrations). RLS scopes every query to the Firebase uid.
@@ -334,6 +334,27 @@ export class SupabaseStore implements TripStore {
     const { error } = await supabase().from("trip_share_links").upsert({ trip_id: tripId, token, created_at: new Date().toISOString() });
     if (error) throw new Error(error.message);
     return token;
+  }
+
+  async getPublicLink(tripId: string): Promise<PublicLink | undefined> {
+    const { data, error } = await supabase().from("trip_public_links").select("token, show_expenses").eq("trip_id", tripId).maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? { token: data.token as string, showExpenses: !!data.show_expenses } : undefined;
+  }
+
+  async setPublicLink(tripId: string, opts: { enabled: boolean; showExpenses: boolean; reset?: boolean }) {
+    const table = supabase().from("trip_public_links");
+    if (!opts.enabled) {
+      const { error } = await table.delete().eq("trip_id", tripId);
+      if (error) throw new Error(error.message);
+      return undefined;
+    }
+    const current = opts.reset ? undefined : await this.getPublicLink(tripId);
+    const token = current?.token ?? randomToken();
+    const { error } = await supabase().from("trip_public_links")
+      .upsert({ trip_id: tripId, token, show_expenses: opts.showExpenses, ...(current ? {} : { created_at: new Date().toISOString() }) });
+    if (error) throw new Error(error.message);
+    return { token, showExpenses: opts.showExpenses };
   }
 
   // ───────────── messages ─────────────

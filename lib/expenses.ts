@@ -48,7 +48,7 @@ export function summarizeExpenses(expenses: TripExpense[], currency: string, rat
 }
 
 /** Estimated cost of the whole itinerary, per person (what the itinerary's estCost means). */
-export const estimatedTotal = (trip: Trip) => trip.itinerary.reduce((s, d) => s + d.items.reduce((n, i) => n + (i.estCost || 0), 0), 0);
+export const estimatedTotal = (trip: Pick<Trip, "itinerary">) => trip.itinerary.reduce((s, d) => s + d.items.reduce((n, i) => n + (i.estCost || 0), 0), 0);
 
 /** Prefill for logging an expense at a stop. */
 export function expenseDraftFor(item: ItineraryItem, day: number, currency: string): Pick<TripExpense, "title" | "amount" | "currency" | "category" | "day" | "itemId"> {

@@ -65,6 +65,11 @@ Debug AI calls with `DEBUG_AI=1 npm run dev`: `lib/debug.ts` logs each AI route'
 - Expense key for a traveler is `travelerKey()`: the user id, or `traveler:<id>` for virtual ones. `/api/trips/travelers/link` (owner, service role) links a virtual traveler to a member and rewrites their expense payer/shares (`rekeyExpense`).
 - Splits default to the people going; the spent-vs-estimate bar multiplies by the travelers count when the list isn't empty.
 
+**Public page (`app/p/[token]/page.tsx`, `lib/server/public-trip.ts`).**
+- `/p/<token>` is a server-rendered, read-only view with no sign-in. It reads with the service role by token from `trip_public_links` (owner-managed via RLS; `anon` has no table access).
+- It shows only the itinerary, estimates, traveler count and, if `show_expenses`, spending totals (by category/day/stop). Never names, emails, owner id, chat, comments or balances; keep `PublicTrip` that narrow.
+- `force-dynamic` so turning the link off or resetting it takes effect immediately; pages are `noindex`.
+
 **i18n.**
 - `lib/i18n.ts` holds the `en` dictionary, which defines `MessageKey`, and a `vi: Record<MessageKey, string>`. Adding a key to `en` without adding it to `vi` fails the typecheck.
 - `t(key, vars)` substitutes `{var}` placeholders.

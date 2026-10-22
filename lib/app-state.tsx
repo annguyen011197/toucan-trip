@@ -95,6 +95,9 @@ interface AppContextValue {
   removeMember: (member: TripMember) => Promise<void>;
   /** Owner: the share link, if link sharing is on. */
   getShareLink: (trip: Trip) => Promise<string | undefined>;
+  /** Owner: the public read-only page (no sign-in), if on. */
+  getPublicLink: (trip: Trip) => Promise<{ url: string; showExpenses: boolean } | undefined>;
+  setPublicLink: (trip: Trip, opts: { enabled: boolean; showExpenses: boolean; reset?: boolean }) => Promise<{ url: string; showExpenses: boolean } | undefined>;
   /** Owner: turns link sharing on with a new link (old ones stop working) or off. */
   resetShareLink: (trip: Trip, enabled: boolean) => Promise<string | undefined>;
 }
@@ -417,6 +420,14 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     return token && shareUrl(token);
   }, []);
 
+  const publicUrl = (l?: { token: string; showExpenses: boolean }) =>
+    l && { url: `${window.location.origin}/p/${encodeURIComponent(l.token)}`, showExpenses: l.showExpenses };
+
+  const getPublicLink = useCallback(async (trip: Trip) => publicUrl(await store().getPublicLink(trip.id)), []);
+
+  const setPublicLink = useCallback(async (trip: Trip, opts: { enabled: boolean; showExpenses: boolean; reset?: boolean }) =>
+    publicUrl(await store().setPublicLink(trip.id, opts)), []);
+
   const resetShareLink = useCallback(async (trip: Trip, enabled: boolean) => {
     const token = await store().resetShareToken(trip.id, enabled);
     return token && shareUrl(token);
@@ -426,9 +437,9 @@ export function AppProvider({ userId, children }: { userId: string; children: Re
     ready, engine, uid: userId, trips, profile, currency, tab, setTab,
     selectedTrip: trips.find((tr) => tr.id === selectedId),
     selectTrip, startNewTrip, deleteTrip, setStatus, applyItinerary: applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, subscribeTravelers, addTraveler, renameTraveler, removeTraveler, linkTraveler, listMembers, inviteMember, removeMember, getShareLink, resetShareLink,
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, subscribeTravelers, addTraveler, renameTraveler, removeTraveler, linkTraveler, listMembers, inviteMember, removeMember, getShareLink, resetShareLink, getPublicLink, setPublicLink,
   }), [ready, engine, userId, trips, profile, currency, tab, setTab, selectedId, selectTrip, startNewTrip, deleteTrip, setStatus, applyItineraryOps, subscribeMessages, sendChat, compactChat, convertTrip, saveProfile, setTripCover, setStopImage, setAvatar,
-    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, subscribeTravelers, addTraveler, renameTraveler, removeTraveler, linkTraveler, listMembers, inviteMember, removeMember, getShareLink, resetShareLink]);
+    isOwner, removeTrip, subscribeComments, addComment, deleteComment, reviewComments, applyComments, subscribeExpenses, saveExpense, deleteExpense, recategorizeExpenses, subscribeTravelers, addTraveler, renameTraveler, removeTraveler, linkTraveler, listMembers, inviteMember, removeMember, getShareLink, resetShareLink, getPublicLink, setPublicLink]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
