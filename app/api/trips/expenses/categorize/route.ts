@@ -5,7 +5,8 @@ import { AuthError, supabaseAdmin, verifyRequest } from "@/lib/server/auth";
 import { debugId, debugLog } from "@/lib/debug";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Gemini 3 + Google Search can take over a minute; 300s is the Hobby max with Fluid compute.
+export const maxDuration = 300;
 
 /**
  * Owner re-categorizes every expense of a trip. Runs with the service role because members' rows are only

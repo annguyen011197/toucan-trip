@@ -5,7 +5,8 @@ import { AuthError, verifyRequest } from "@/lib/server/auth";
 import type { ImageFolder } from "@/lib/images";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Gemini 3 + Google Search can take over a minute; 300s is the Hobby max with Fluid compute.
+export const maxDuration = 300;
 
 const ASPECT: Partial<Record<ImageFolder, string>> = { covers: "16:9", stops: "4:3", avatars: "1:1" };
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };

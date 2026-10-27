@@ -9,7 +9,8 @@ import { isLang } from "@/lib/i18n";
 import { debugId, debugLog } from "@/lib/debug";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Gemini 3 + Google Search can take over a minute; 300s is the Hobby max with Fluid compute.
+export const maxDuration = 300;
 
 /**
  * The owner applies approved comments to the whole itinerary with AI. Stateless like /api/chat:

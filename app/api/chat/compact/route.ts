@@ -6,7 +6,8 @@ import { isLang, type Lang } from "@/lib/i18n";
 import { debugLog } from "@/lib/debug";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Gemini 3 + Google Search can take over a minute; 300s is the Hobby max with Fluid compute.
+export const maxDuration = 300;
 
 /** Summarizes messages the client is about to compact. The client swaps them for the summary in Supabase. */
 export async function POST(request: Request) {

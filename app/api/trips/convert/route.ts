@@ -8,7 +8,8 @@ import { exchangeRate } from "@/lib/server/rates";
 import { AuthError, verifyRequest } from "@/lib/server/auth";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Gemini 3 + Google Search can take over a minute; 300s is the Hobby max with Fluid compute.
+export const maxDuration = 300;
 
 /**
  * Converts a trip to another language and/or currency and returns it; the client persists it.
