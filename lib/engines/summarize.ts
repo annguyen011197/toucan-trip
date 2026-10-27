@@ -1,3 +1,4 @@
+import { geminiModel } from "./model";
 import { GoogleGenAI } from "@google/genai";
 import type { ChatMessage, Trip } from "../types";
 import { LANG_PROMPT_NAME, type Lang } from "../i18n";
@@ -19,7 +20,7 @@ export async function summarizeChat(trip: Trip, messages: ChatMessage[], apiKey?
   debugLog("summarize", "request", input);
   const started = Date.now();
   const res = await ai.models.generateContent({
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    model: geminiModel(),
     contents: [{ role: "user", parts: [{ text: input }] }],
     config: {
       systemInstruction:

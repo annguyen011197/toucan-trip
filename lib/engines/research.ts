@@ -1,3 +1,4 @@
+import { geminiModel } from "./model";
 import { GoogleGenAI } from "@google/genai";
 import type { HotelOffer, HotelQuery, PlaceQuery, PlaceResult } from "../types";
 import { LANG_PROMPT_NAME, type Lang } from "../i18n";
@@ -13,9 +14,9 @@ export interface Researcher {
 interface Options { lang: Lang; currency: string; budget?: string; debugScope?: string }
 
 /**
- * A separate Gemini call grounded with Google Search. The planner's own loop can't use the built-in search tool:
- * mixing it with function declarations needs Gemini 3+ (preview), and on 2.5 grounding can't be combined with
- * responseSchema, so the JSON is asked for in the prompt and parsed leniently.
+ * A separate Gemini call grounded with Google Search, returning cards as JSON. The planner loop also has Google Search
+ * (tool combination on Gemini 3+), but card data stays here so prices only come from this structured step.
+ * Grounding isn't combined with responseSchema here, so the JSON is asked for in the prompt and parsed leniently.
  */
 export function geminiResearcher(apiKey: string, opts: Options): Researcher {
   const ai = new GoogleGenAI({ apiKey });
@@ -25,7 +26,7 @@ export function geminiResearcher(apiKey: string, opts: Options): Researcher {
     debugLog(scope, `${label} request`, prompt);
     const started = Date.now();
     const res = await ai.models.generateContent({
-      model: process.env.GEMINI_RESEARCH_MODEL || process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: process.env.GEMINI_RESEARCH_MODEL || geminiModel(),
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: { tools: [{ googleSearch: {} }], temperature: 0.2 },
     });

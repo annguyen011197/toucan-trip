@@ -1,3 +1,4 @@
+import { geminiModel } from "./model";
 import { GoogleGenAI, Type, type Schema } from "@google/genai";
 import { ITEM_CATEGORIES, type ItemCategory } from "../types";
 import { guessCategory, isItemCategory } from "../expenses";
@@ -36,7 +37,7 @@ export async function geminiCategorize(items: CategorizeItem[], apiKey: string, 
     const batch = items.slice(i, i + 150).map(({ id, title, note, stop }) => ({ id, title, note: note || undefined, stop }));
     debugLog(scope, "gemini request", batch);
     const res = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: geminiModel(),
       contents: [{ role: "user", parts: [{ text: JSON.stringify(batch) }] }],
       config: { systemInstruction: PROMPT, responseMimeType: "application/json", responseSchema: schema, temperature: 0 },
     });

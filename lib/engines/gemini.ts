@@ -6,6 +6,7 @@ import { toISODate } from "../time";
 import type { BotTurn } from "./mock";
 import { LANG_PROMPT_NAME, type Lang } from "../i18n";
 import { debugLog } from "../debug";
+import { geminiModel, groundingEnabled } from "./model";
 
 /**
  * Gemini with function calling. Runs only on the server (API route), so GEMINI_API_KEY never reaches the browser.
@@ -30,6 +31,8 @@ Follow this flow, using the [trip state] JSON to see what is already known:
 5. Offer flights, hotels and restaurants with searchFlights / searchHotels / searchPlaces. The app shows their results as cards automatically — don't repeat prices in your text.
    searchPlaces / searchHotels return real places from Google Search: make "query" specific (cuisine, dish, vibe, diet, area — e.g. "authentic bún chả near Hoan Kiem" rather than "restaurant"),
    and when adding one of them to the itinerary reuse its name, address and lat/lng exactly.
+   You also have Google Search: use it for facts that change — opening hours and closing days, current events or festivals on the trip dates,
+   seasonal weather, entry/visa rules, ticket booking requirements — and when unsure a place still exists. Never take prices from it into your text.
 6. When the user confirms the plan, call updateTripInfo with status "upcoming".
 7. If the user asks for tips, what to wear or what to pack, add tips to the stops that lack them (hasTips: false) with "edit" ops, then sum up the trip-wide essentials in your reply.
 
@@ -192,9 +195,12 @@ export async function geminiRespond(req: ChatRequest, tools: ToolExecutor, apiKe
 export async function runToolLoop(opts: {
   apiKey: string; systemInstruction: string; contents: Content[]; tools: ToolExecutor;
   declarations: FunctionDeclaration[]; finishName: string; temperature: number; debugScope?: string;
+  /** Let the model use Google Search alongside the function declarations (Gemini 3+). Defaults to GEMINI_GROUNDING. */
+  grounding?: boolean;
 }): Promise<{ finish?: Record<string, unknown>; lastText: string }> {
   const ai = new GoogleGenAI({ apiKey: opts.apiKey });
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = geminiModel();
+  const grounded = opts.grounding ?? groundingEnabled();
   const contents = [...opts.contents];
   const scope = opts.debugScope ?? "gemini";
   debugLog(scope, `system prompt (${model}, temperature ${opts.temperature})`, opts.systemInstruction);
@@ -208,8 +214,12 @@ export async function runToolLoop(opts: {
       contents,
       config: {
         systemInstruction: opts.systemInstruction,
-        tools: [{ functionDeclarations: opts.declarations }],
-        toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY } },
+        // With Google Search mixed in, the model may search (server-side) before calling our functions.
+        // Tool combination needs VALIDATED mode + includeServerSideToolInvocations; AUTO isn't supported.
+        tools: grounded ? [{ googleSearch: {} }, { functionDeclarations: opts.declarations }] : [{ functionDeclarations: opts.declarations }],
+        toolConfig: grounded
+          ? { functionCallingConfig: { mode: FunctionCallingConfigMode.VALIDATED }, includeServerSideToolInvocations: true }
+          : { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY } },
         temperature: opts.temperature,
       },
     });
@@ -218,10 +228,12 @@ export async function runToolLoop(opts: {
       finishReason: res.candidates?.[0]?.finishReason,
       usage: res.usageMetadata,
       functionCalls: calls.map((c) => ({ name: c.name, args: c.args })),
+      searchQueries: res.candidates?.[0]?.groundingMetadata?.webSearchQueries,
       text: calls.length ? undefined : res.text,
     });
     if (!calls.length) { lastText = res.text ?? ""; break; }
 
+    // Push every part back unchanged (search tool calls/results, ids, thought signatures) or the next round errors.
     const modelContent = res.candidates?.[0]?.content;
     if (modelContent) contents.push(modelContent);
 

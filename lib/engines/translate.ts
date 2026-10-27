@@ -1,3 +1,4 @@
+import { geminiModel } from "./model";
 import { GoogleGenAI, Type, type Schema } from "@google/genai";
 import type { Trip } from "../types";
 import { LANG_PROMPT_NAME, type Lang } from "../i18n";
@@ -32,7 +33,7 @@ export async function translateTrip(trip: Trip, to: Lang, apiKey: string): Promi
   debugLog("translate", `request → ${to}`, payload);
   const started = Date.now();
   const res = await ai.models.generateContent({
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    model: geminiModel(),
     contents: [{ role: "user", parts: [{ text: JSON.stringify(payload) }] }],
     config: {
       systemInstruction:
